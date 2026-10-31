@@ -1,0 +1,16 @@
+data
+dist
+backups
+node_modules
+tests
+test-results
+referencia
+.git
+.env*
+!.env.example
+*.log
+tmole.exe
+INICIAR-*.cmd
+FASE-*.md
+hoja-componentes-taller.html
+REVISION-DESPLIEGUE.md

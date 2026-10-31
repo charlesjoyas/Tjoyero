@@ -1,0 +1,12 @@
+data/
+backups/
+test-results/
+node_modules/
+*.log
+.env*
+!.env.example
+.vercel/
+public/
+dist/
+tmole.exe
+referencia/
