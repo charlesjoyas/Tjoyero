@@ -122,11 +122,22 @@ function permit(actor, permission) {
     403,
   );
 }
+function defaultGoldCategories() {
+  return [
+    { id: "gold-24k", name: "Oro 24k", purity: 999, active: true },
+    { id: "gold-22k", name: "Oro 22k", purity: 916, active: true },
+    { id: "gold-18k", name: "Oro 18k", purity: 750, active: true },
+    { id: "gold-14k", name: "Oro 14k", purity: 585, active: true },
+    { id: "gold-10k", name: "Oro 10k", purity: 417, active: true },
+    { id: "gold-fine", name: "Oro fino puro", purity: 1000, active: true },
+  ];
+}
 function initialState() {
   return {
     version: 1,
     revision: 0,
     settings: {
+      goldCategories: defaultGoldCategories(),
       name: "Mi taller joyero",
       nit: "",
       phone: "",
@@ -328,6 +339,22 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
+    case "category.save": {
+      permit(a, "settings");
+      const categories = s.settings.goldCategories || defaultGoldCategories();
+      const existing = b.id ? categories.find((x) => x.id === b.id) : null;
+      assert(!b.id || existing, "Categoría no encontrada.", 404);
+      const name = str(b.name, "Nombre de la categoría", 80);
+      assert(!categories.some((x) => x.id !== b.id && x.name.toLocaleLowerCase("es-CO") === name.toLocaleLowerCase("es-CO")), "Ya existe una categoría con ese nombre.");
+      const law = purity(b.purity);
+      assert(b.active === undefined || typeof b.active === "boolean" || ["true", "false"].includes(b.active), "Estado de categoría inválido.");
+      assert(existing || categories.length < 200, "Puedes registrar hasta 200 categorías.");
+      const category = { id: existing?.id || id(), name, purity: law, active: b.active !== false && b.active !== "false" };
+      if (existing) Object.assign(existing, category);
+      else categories.push(category);
+      s.settings.goldCategories = categories;
+      return category;
+    }
     case "client.save": {
       permit(a, "clients");
       const existing = b.id ? get(s, "clients", b.id) : null;
@@ -1611,6 +1638,19 @@ function validateState(s) {
       }
     }
   }
+  if (s.settings.goldCategories !== undefined) {
+    const categories = s.settings.goldCategories;
+    assert(Array.isArray(categories) && categories.length <= 200, "Catálogo de categorías inválido.");
+    const categoryIds = new Set(), names = new Set();
+    for (const x of categories) {
+      assert(x && typeof x.id === "string" && x.id.length > 0 && !categoryIds.has(x.id), "Identificador de categoría inválido.");
+      const name = str(x.name, "Nombre de la categoría", 80).toLocaleLowerCase("es-CO");
+      assert(!names.has(name) && typeof x.active === "boolean", "Categoría duplicada o estado inválido.");
+      purity(x.purity);
+      categoryIds.add(x.id);
+      names.add(name);
+    }
+  }
   const ids = (collection) => new Set(s[collection].map((x) => x.id));
   const clients = ids("clients"),
     orders = ids("orders"),
@@ -1796,6 +1836,7 @@ function validateState(s) {
   return s;
 }
 module.exports = {
+  defaultGoldCategories,
   validateState,
   initialState,
   execute,

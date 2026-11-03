@@ -38,10 +38,13 @@ function createApp(options = {}) {
       JSON.stringify(D.initialState()),
     );
   }
-  const read = async () =>
-    JSON.parse(
+  const read = async () => {
+    const state = JSON.parse(
       (await db.prepare("SELECT json FROM state WHERE id=1").get()).json,
     );
+    state.settings.goldCategories ??= D.defaultGoldCategories();
+    return state;
+  };
   const save = async (s) => {
     D.validateState(s);
     await db

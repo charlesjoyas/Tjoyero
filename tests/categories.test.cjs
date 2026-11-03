@@ -1,0 +1,65 @@
+"use strict";
+const {test} = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const {randomUUID} = require("node:crypto");
+const D = require("../domain.cjs");
+const {createApp} = require("../server.cjs");
+const admin = {name:"Administrador", role:"admin"};
+
+test("Categorías: leyes, nombres, permisos y compatibilidad con copias anteriores", () => {
+  const s = D.initialState();
+  delete s.settings.goldCategories;
+  D.validateState(s);
+  assert.throws(() => D.execute(s,"category.save",{name:"Oro 16k",purity:667},{role:"recepcion"}), /rol/);
+  const category = D.execute(s,"category.save",{name:"Oro 16k",purity:667},admin);
+  assert.equal(s.settings.goldCategories.length,D.defaultGoldCategories().length + 1);
+  assert.throws(() => D.execute(s,"category.save",{name:" ORO 16K ",purity:667},admin), /existe/);
+  for (const purity of [0,1001,750.5,"",null,true])
+    assert.throws(() => D.execute(s,"category.save",{name:"Inválido",purity},admin));
+  assert.throws(() => D.execute(s,"category.save",{id:"missing",name:"Oro",purity:750},admin), /encontrada/);
+  D.execute(s,"category.save",{...category,name:"Oro ensayado",purity:666,active:"false"},admin);
+  assert.equal(s.settings.goldCategories.find(x=>x.id===category.id).active,false);
+  D.validateState(s);
+  const duplicate = structuredClone(s);
+  duplicate.settings.goldCategories.push({...duplicate.settings.goldCategories[0],id:"duplicado"});
+  assert.throws(()=>D.validateState(duplicate),/duplicada/);
+});
+
+test("Categorías API: estado antiguo, guardado persistente, auditoría y rechazo de ley inválida", async () => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"aurea-categorias-"));
+  const app=createApp({dataDir:dir});
+  await new Promise(r=>app.server.listen(0,"127.0.0.1",r));
+  const base="http://127.0.0.1:"+app.server.address().port;
+  try {
+    const setup=await fetch(base+"/api/setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({workshop:"Taller",name:"Admin",username:"admin",password:"1234"})});
+    assert.equal(setup.status,201);
+    const cookie=setup.headers.get("set-cookie").split(";")[0];
+    const legacy=JSON.parse(app.db.prepare("SELECT json FROM state WHERE id=1").get().json);
+    delete legacy.settings.goldCategories;
+    app.db.prepare("UPDATE state SET json=? WHERE id=1").run(JSON.stringify(legacy));
+    const read=async()=> (await (await fetch(base+"/api/state",{headers:{Cookie:cookie}})).json()).state;
+    let state=await read();
+    assert.ok(state.settings.goldCategories.some(x=>x.purity===585));
+    const send=async(data)=>fetch(base+"/api/action",{method:"POST",headers:{Cookie:cookie,"Content-Type":"application/json","If-Match":String(state.revision),"Idempotency-Key":randomUUID()},body:JSON.stringify({action:"category.save",data})});
+    assert.equal((await send({name:"Oro 16k",purity:667})).status,200);
+    state=await read();
+    const category=state.settings.goldCategories.find(x=>x.name==="Oro 16k");
+    assert.equal(category.purity,667);
+    assert.equal((await send({name:"Error",purity:750.5})).status,400);
+    assert.equal((await read()).revision,state.revision);
+    const client=D.execute(state,"client.save",{name:"Cliente"},admin);
+    D.execute(state,"order.create",{clientId:client.id,type:"Reparación",description:"Cadena oro 16k",condition:"Recibida",metal:"oro",purity:category.purity,receivedWeight:3,dueDate:"2026-12-01",labor:50000,materialPrice:0,goldPrice:0,taxPercent:0},admin);
+    app.db.prepare("UPDATE state SET json=? WHERE id=1").run(JSON.stringify(state));
+    assert.equal((await send({...category,purity:666,active:false})).status,200);
+    state=await read();
+    assert.equal(state.settings.goldCategories.find(x=>x.id===category.id).active,false);
+    assert.equal(state.orders[0].purity,667,"Editar el catálogo no altera las órdenes existentes");
+    assert.ok(app.db.prepare("SELECT id FROM audit WHERE action='category.save'").get());
+    const stored=JSON.parse(app.db.prepare("SELECT json FROM state WHERE id=1").get().json);
+    D.validateState(stored);
+    assert.equal(stored.settings.goldCategories.find(x=>x.id===category.id).active,false);
+  } finally {await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
+});

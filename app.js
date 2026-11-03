@@ -253,7 +253,12 @@ const metalSelect = (value = "oro") =>
     ],
     value,
   );
+const goldCategories = () => S?.settings?.goldCategories || [];
+const categorySelect = (name) =>
+  `<div class="field"><label for="category-${E(name)}">Categoría de oro</label><select class="control" id="category-${E(name)}" data-gold-category="${E(name)}"><option value="">Elegir categoría / ley manual</option>${goldCategories().filter((x) => x.active).map((x) => `<option value="${E(x.id)}">${E(x.name)} · ley ${number(x.purity)}</option>`).join("")}</select></div>`;
+const goldLawOptions = () => goldCategories().filter((x) => x.active).map((x) => `<option value="${number(x.purity)}">${E(x.name)}</option>`).join("");
 const puritySelect = (name = "purity", value = 750) =>
+  categorySelect(name) +
   field(
     name,
     "Ley ensayada (milésimas)",
@@ -263,7 +268,7 @@ const puritySelect = (name = "purity", value = 750) =>
   ) +
   '<datalist id="purities-' +
   name +
-  '"><option value="999,00">24k</option><option value="750,00">18k</option><option value="585,00">14k</option><option value="417,00">10k</option><option value="925,00">Plata 925</option><option value="950,00">950</option><option value="1.000,00">Fino puro</option></datalist>';
+  '">' + goldLawOptions() + '<option value="925,00">Plata 925</option><option value="950,00">950</option></datalist>';
 const empty = (title, desc, action = "") =>
   `<div class="empty">${icon("gem")}<h3>${E(title)}</h3><p>${E(desc)}</p>${action}</div>`;
 const notice = (title, desc = "", color = "") =>
@@ -650,6 +655,7 @@ const navGroups = [
     "SISTEMA",
     [
       ["users", "Usuarios y acceso", "shield"],
+      ["categories", "Categorías", "gold"],
       ["settings", "Configuración", "settings"],
     ],
   ],
@@ -675,6 +681,7 @@ function render() {
         `<div class="navgroup"><span class="eyebrow">${label}</span>${pages
           .filter((x) => x[0] !== "users" || can("users"))
           .filter((x) => x[0] !== "settings" || can("settings"))
+          .filter((x) => x[0] !== "categories" || can("settings"))
           .filter((x) => x[0] !== "reports" || can("reports"))
           .map(
             ([key, label, ic]) =>
@@ -745,6 +752,8 @@ function renderPage() {
       return can("users") ? usersPage() : notice("Acceso restringido");
     case "settings":
       return can("settings") ? settingsPage() : notice("Acceso restringido");
+    case "categories":
+      return can("settings") ? categoriesPage() : notice("Acceso restringido");
     case "assistant":
       return assistantPage();
     default:
@@ -1928,6 +1937,15 @@ function usersPage() {
     )}<p class="muted section-gap" style="font-size:11px">Los retornos con merma crítica, las diferencias de caja y los ajustes de existencias requieren un administrador.</p></section>`
   );
 }
+function categoriesPage() {
+  return head("EL ORO DE TU TALLER", "Categorías de oro", "Define los tipos de oro y su ley en milésimas para usarlos en las operaciones del taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
+    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), button("Editar", "edit-category", "edit", "small", x.id)])).join("")));
+}
+function categoryModal(id) {
+  const x = goldCategories().find((x) => x.id === id) || {};
+  simpleModal(id ? "Editar categoría de oro" : "Nueva categoría de oro", "category.save",
+    `<div class="form-grid"><div class="span-2">${field("name", "Nombre de la categoría", "text", x.name || "", 'required maxlength="80" placeholder="Ej. Oro 16k"')}</div>${field("purity", "Ley en milésimas", "number", x.purity ?? 750, 'min="1" max="1000" step="1" required')}${select("active", "Estado", [["true", "Activa"], ["false", "Inactiva"]], String(x.active ?? true))}<p class="muted span-2">Ejemplos: oro 18k = 750; oro 14k = 585. Usa la ley ensayada de tu material. Las categorías inactivas dejan de aparecer en los formularios.</p></div>`, id ? {id} : {});
+}
 function settingsPage() {
   const x = S.settings;
   return (
@@ -2007,6 +2025,7 @@ function assistantPage() {
 }
 function actionLabel(a) {
   const labels = {
+    "category.save": "Categoría guardada",
     "client.save": "Cliente guardado",
     "order.create": "Orden recibida",
     "order.assign": "Asignación a mesa",
@@ -2175,7 +2194,7 @@ function updatePaymentPreview() {
 }
 let openingGoldRowId = 0;
 function openingGoldRow(index) {
-  return `<section class="gold-opening-row" data-opening-row="${index}"><div class="card-head"><h3>Oro de apertura</h3>${index ? button("Quitar", "remove-opening-gold", "", "small", String(index)) : ""}</div><div class="form-grid">${field("openingPurity-" + index, "Ley del oro (milésimas)", "number", 750, 'min="1" max="1000" step="1" required list="opening-gold-laws"')}${weightField("openingWeight-" + index, "Base inicial de oro (g)", "")}</div><p class="balance-details muted" data-gold-availability></p></section>`;
+  return `<section class="gold-opening-row" data-opening-row="${index}"><div class="card-head"><h3>Oro de apertura</h3>${index ? button("Quitar", "remove-opening-gold", "", "small", String(index)) : ""}</div><div class="form-grid">${categorySelect("openingPurity-" + index)}${field("openingPurity-" + index, "Ley del oro (milésimas)", "number", 750, 'min="1" max="1000" step="1" required list="opening-gold-laws"')}${weightField("openingWeight-" + index, "Base inicial de oro (g)", "")}</div><p class="balance-details muted" data-gold-availability></p></section>`;
 }
 function openShiftModal() {
   openingGoldRowId = 0;
@@ -2190,7 +2209,7 @@ function openShiftModal() {
         ["mixed", "Mixto: efectivo y oro"],
       ],
       "cash",
-    )}</div><div class="span-2" data-opening-cash>${moneyField("opening", "Base física inicial de efectivo · COP", 0)}</div><div class="span-2" data-opening-gold hidden>${notice("El oro se traslada de bodega a caja", "Usa oro propio ya registrado en el Libro de metales. La apertura conserva el inventario total y no cuenta como venta ni abono.", "blue")}<datalist id="opening-gold-laws"><option value="999,00">24k</option><option value="750,00">18k</option><option value="585,00">14k</option><option value="417,00">10k</option><option value="1.000,00">Fino puro</option></datalist><div id="opening-gold-rows">${openingGoldRow(0)}</div><div class="actions section-gap">${button("Agregar otra ley", "add-opening-gold", "plus", "small")}</div></div><div id="opening-preview" class="calculator span-2"></div></div>`,
+    )}</div><div class="span-2" data-opening-cash>${moneyField("opening", "Base física inicial de efectivo · COP", 0)}</div><div class="span-2" data-opening-gold hidden>${notice("El oro se traslada de bodega a caja", "Usa oro propio ya registrado en el Libro de metales. La apertura conserva el inventario total y no cuenta como venta ni abono.", "blue")}<datalist id="opening-gold-laws">${goldLawOptions()}</datalist><div id="opening-gold-rows">${openingGoldRow(0)}</div><div class="actions section-gap">${button("Agregar otra ley", "add-opening-gold", "plus", "small")}</div></div><div id="opening-preview" class="calculator span-2"></div></div>`,
     (b, f, key) => {
       const openingGold =
         b.mode === "cash"
@@ -3003,6 +3022,12 @@ async function handleAction(action, id, el) {
     case "new-supplier":
       supplierModal();
       break;
+    case "new-category":
+      categoryModal();
+      break;
+    case "edit-category":
+      categoryModal(id);
+      break;
     case "edit-supplier":
       supplierModal(id);
       break;
@@ -3540,6 +3565,11 @@ document.addEventListener(
 );
 document.addEventListener("input", (e) => {
   const el = e.target;
+  if (el.name && el.form) {
+    const categoryField = [...el.form.querySelectorAll("[data-gold-category]")].find((x) => x.dataset.goldCategory === el.name);
+    const category = goldCategories().find((x) => x.id === categoryField?.value);
+    if (category && numericValue(el) !== category.purity) categoryField.value = "";
+  }
   if (el.matches("[data-number]"))
     formatNumericInput(
       el,
@@ -3581,6 +3611,24 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
+  if (el.name === "metal" && el.value !== "oro") {
+    el.form?.querySelectorAll("[data-gold-category]").forEach((x) => { x.value = ""; });
+  }
+  if (el.matches("[data-gold-category]")) {
+    const category = goldCategories().find((x) => x.id === el.value && x.active);
+    const form = el.closest("form");
+    if (category && form) {
+      const target = form.elements.namedItem(el.dataset.goldCategory);
+      if (target) {
+        setNumericValue(target, category.purity);
+        if (form.elements.metal) {
+          form.elements.metal.value = "oro";
+          form.elements.metal.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+  }
   if (el.name === "serialBaud" && $("#settings-form")) {
     $("#settings-form").elements.baudRate.value = el.value;
     dirty = true;
