@@ -36,6 +36,7 @@ const ROLES = {
   contador: ["purchases", "payments", "cash", "reports"],
   consulta: [],
 };
+const EXPENSE_CATEGORIES = ["Arriendo","Servicios públicos","Herramientas y mantenimiento","Transporte","Aseo y suministros","Personal y administración","Otros"];
 function fail(message, status = 400) {
   const e = new Error(message);
   e.status = status;
@@ -119,7 +120,7 @@ function date(v) {
   return v;
 }
 function get(s, coll, key) {
-  const v = s[coll].find((x) => x.id === key);
+  const v = (s[coll] || []).find((x) => x.id === key);
   assert(v, "Registro no encontrado.", 404);
   return v;
 }
@@ -1118,6 +1119,27 @@ function execute(s, action, b, a) {
       );
       return shift;
     }
+    case "expense.create":
+    case "expense.classify": {
+      permit(a,"cash");
+      const amount=money(b.amount,"Valor del gasto");assert(amount>0,"El gasto debe ser mayor que cero.");
+      assert(EXPENSE_CATEGORIES.includes(b.category),"Selecciona una categoría de gasto válida.");
+      assert(["cash","bank"].includes(b.method),"Medio de pago inválido.");
+      const expenseDate=date(b.expenseDate??day());assert(typeof expenseDate==="string","Fecha del gasto inválida.");assert(expenseDate<=day(),"La fecha del gasto no puede estar en el futuro.");
+      const x={id:id(),code:seq(s,"expense","G"),at:now(),actor:a.name,expenseDate,category:b.category,concept:str(b.concept,"Concepto del gasto",1000),beneficiary:str(b.beneficiary,"Pagado a",120,false),reference:str(b.reference,"Soporte / referencia",200,b.method==="bank"),method:b.method,amount,shiftId:null,cashEntryId:null};
+      if(action==="expense.classify") {
+        const entry=get(s,"cashEntries",b.cashEntryId);
+        assert(entry.ref==="CAJA"&&entry.amount<0&&!entry.reversedAt&&!entry.expenseId,"La salida ya está clasificada, reversada o corresponde a otra operación.");
+        assert(b.method==="cash"&&amount===-entry.amount,"El medio y el valor deben coincidir con la salida original.");
+        x.cashEntryId=entry.id;x.shiftId=entry.shiftId;x.classifiedFromCash=true;entry.expenseId=x.id;
+      } else if(x.method==="cash") {
+        const shift=openShift(s);
+        assert(b.shiftId===undefined||b.shiftId===shift.id,"El turno de caja cambió. Abre nuevamente el formulario y revisa el gasto.",409);
+        cash(s,a,shift,-amount,"Gasto "+x.code+" · "+x.concept,x.code);
+        const entry=s.cashEntries.at(-1);entry.expenseId=x.id;x.cashEntryId=entry.id;x.shiftId=shift.id;
+      }
+      s.expenses??=[];s.expenses.push(x);return x;
+    }
     case "shift.close": {
       permit(a, "cash");
       const shift = openShift(s);
@@ -1718,6 +1740,22 @@ function validateState(s) {
     }
   }
   const ids = (collection) => new Set(s[collection].map((x) => x.id));
+  const expensesByEntry = new Map();
+  if(s.expenses!==undefined) {
+    assert(Array.isArray(s.expenses),"Historial de gastos inválido.");
+    const keys=new Set(),entries=new Set(),codes=new Set();
+    for(const x of s.expenses) {
+      assert(x&&typeof x.id==="string"&&x.id.length>0&&!keys.has(x.id)&&typeof x.code==="string"&&x.code.length>0&&!codes.has(x.code)&&typeof x.actor==="string"&&Number.isFinite(Date.parse(x.at)),"Registro de gasto inválido.");
+      keys.add(x.id);codes.add(x.code);assert(typeof x.expenseDate==="string","Fecha del gasto inválida.");date(x.expenseDate);str(x.concept,"Concepto del gasto",1000);str(x.beneficiary,"Pagado a",120,false);str(x.reference,"Soporte del gasto",200,x.method==="bank");
+      assert(EXPENSE_CATEGORIES.includes(x.category)&&["cash","bank"].includes(x.method),"Categoría o medio del gasto inválido.");money(x.amount,"Valor del gasto");assert(x.amount>0,"Gasto sin valor.");
+      if(x.method==="cash") {
+        const entry=s.cashEntries.find(e=>e.id===x.cashEntryId);
+        assert(entry&&!entries.has(entry.id)&&entry.expenseId===x.id&&entry.amount===-x.amount&&entry.shiftId===x.shiftId&&(entry.ref===x.code||(x.classifiedFromCash===true&&entry.ref==="CAJA"))&&!!entry.reversedAt===!!x.reversedAt,"El gasto no concilia con su salida de caja.");
+        entries.add(entry.id);
+        expensesByEntry.set(entry.id,x);
+      } else assert(x.cashEntryId===null&&x.shiftId===null,"Un gasto bancario no debe descontar caja.");
+    }
+  }
   const clients = ids("clients"),
     orders = ids("orders"),
     smiths = ids("smiths"),
@@ -1893,11 +1931,13 @@ function validateState(s) {
   }
   for (const p of s.supplierPayments)
     assert(purchases.has(p.purchaseId), "Pago de compra inexistente.");
-  for (const x of s.cashEntries)
+  for (const x of s.cashEntries) {
     assert(
       shifts.has(x.shiftId) && Number.isSafeInteger(x.amount),
       "Movimiento de caja inválido.",
     );
+    if(x.expenseId!==undefined)assert(expensesByEntry.get(x.id)?.id===x.expenseId,"Salida de caja sin su gasto correspondiente.");
+  }
   for (const x of s.stock)
     assert(
       orders.has(x.orderId) &&
@@ -1919,6 +1959,7 @@ function validateState(s) {
   return s;
 }
 module.exports = {
+  EXPENSE_CATEGORIES,
   defaultMetals,
   defaultGoldCategories,
   validateState,

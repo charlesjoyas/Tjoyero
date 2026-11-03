@@ -243,6 +243,7 @@ const weightField = (name, label, val = "", zero = false) =>
     : "") +
   "</div>";
 const metals = () => S?.settings?.metals || [];
+let expenseCategories = [];
 const metalSelect = (value = "oro", label = "Metal") =>
   select("metal", label, metals().map((x) => [x.id, x.name]), value);
 const goldCategories = () => S?.settings?.goldCategories || [];
@@ -429,6 +430,7 @@ async function load({ ifIdle = false } = {}) {
   AUDIT = d.audit;
   ACC = d.accounts;
   PERM = d.permissions;
+  expenseCategories = d.expenseCategories || [];
   return true;
 }
 async function mutate(action, data, key = crypto.randomUUID(), revision = S.revision) {
@@ -638,6 +640,7 @@ const navGroups = [
     [
       ["payments", "Cobros y cartera", "cash"],
       ["cash", "Caja y turnos", "cash"],
+      ["expenses", "Gastos del taller", "cash"],
       ["purchases", "Compras y proveedores", "box"],
       ["stock", "Piezas terminadas", "gem"],
       ["reports", "Reportes y auditoría", "chart"],
@@ -678,6 +681,7 @@ function render() {
           .filter((x) => x[0] !== "categories" || can("settings"))
           .filter((x) => x[0] !== "reports" || can("reports"))
           .filter((x) => x[0] !== "reversals" || can("adjust"))
+          .filter((x) => x[0] !== "expenses" || can("cash"))
           .map(
             ([key, label, ic]) =>
               `<button class="navbutton ${view === key ? "active" : ""}" data-nav="${key}">${icon(ic)}<span>${label}</span>${key === "orders" && S.orders.some(active) ? `<span class="count">${number(S.orders.filter(active).length)}</span>` : ""}</button>`,
@@ -729,6 +733,8 @@ function renderPage() {
       return paymentsPage();
     case "cash":
       return cashPage();
+    case "expenses":
+      return can("cash") ? expensesPage() : notice("Acceso restringido");
     case "purchases":
       return purchasesPage();
     case "materials":
@@ -1707,6 +1713,48 @@ function paymentsPage() {
     )}</section>`
   );
 }
+function expenseRows() {
+  const recorded=(S.expenses||[]).map(x=>({...x,kind:"expense",key:"expense|"+x.id,legacy:false}));
+  const previous=S.cashEntries.filter(x=>x.ref==="CAJA"&&x.amount<0&&!x.expenseId).map(x=>({...x,kind:"cash",key:"cash|"+x.id,legacy:true,code:"Salida de caja",expenseDate:dayKey(x.at),concept:x.note,category:"Sin clasificar",beneficiary:"",reference:"",method:"cash",amount:-x.amount}));
+  return [...recorded,...previous].sort((a,b)=>a.at.localeCompare(b.at));
+}
+function filteredExpenses() {
+  const from=filters.expenseFrom||today().slice(0,7)+"-01",to=filters.expenseTo||today();
+  return expenseRows().filter(x=>x.expenseDate>=from&&x.expenseDate<=to&&(!filters.expenseMethod||x.method===filters.expenseMethod)&&(!filters.expenseCategory||x.category===filters.expenseCategory));
+}
+function expensesPage() {
+  const rows=filteredExpenses(),active=rows.filter(x=>!x.reversedAt&&!x.legacy),sum=items=>items.reduce((v,x)=>v+x.amount,0);
+  return head("EL DÍA A DÍA DEL TALLER","Gastos del taller","Registra lo pagado, conserva el soporte y revisa de dónde salió el dinero.",allowed("cash","Registrar gasto","new-expense","plus","primary")+button("Exportar CSV","export-expenses","download"))+
+    notice("Una sola salida de dinero","Un gasto en efectivo descuenta la caja abierta. Un gasto bancario no toca el efectivo. Las salidas antiguas se pueden clasificar sin descontarlas otra vez.","blue")+
+    `<div class="filters card section-gap">${field("expenseFrom","Desde","date",filters.expenseFrom||today().slice(0,7)+"-01",'data-filter="expenseFrom"')}${field("expenseTo","Hasta","date",filters.expenseTo||today(),'data-filter="expenseTo"')}<label class="field"><span>Medio de pago</span><select data-filter="expenseMethod">${[["","Todos"],["cash","Efectivo"],["bank","Banco"]].map(x=>option(x[0],x[1],filters.expenseMethod||"")).join("")}</select></label><label class="field"><span>Categoría</span><select data-filter="expenseCategory">${[["","Todas"],...expenseCategories.map(x=>[x,x]),["Sin clasificar","Sin clasificar"]].map(x=>option(x[0],x[1],filters.expenseCategory||"")).join("")}</select></label></div>`+
+    `<div class="kpis">${kpi("Gastos clasificados",cop(sum(active)),"Del período · sin reversados","cash",true)}${kpi("Pagados desde caja",cop(sum(active.filter(x=>x.method==="cash"))),"Ya descontados del efectivo","cash")}${kpi("Pagados por banco",cop(sum(active.filter(x=>x.method==="bank"))),"No descuentan caja","file")}${kpi("Salidas sin clasificar",cop(sum(rows.filter(x=>x.legacy&&!x.reversedAt))),"Movimientos anteriores de caja","chart")}</div>`+
+    card("Historial de gastos y salidas","Las compras de metal y los pagos a proveedores u orfebres se registran en sus módulos, para no duplicar salidas.",table(["Fecha / comprobante","Categoría / concepto","Pagado a / soporte","Medio","Valor · COP","Estado / acciones"],[...rows].reverse().map(x=>tr([dateLabel(x.expenseDate)+"<small>"+E(x.code)+" · "+E(x.actor)+"</small>",E(x.category)+"<small>"+E(x.concept)+"</small>",E(x.beneficiary||"—")+"<small>"+E(x.reference)+"</small>",x.method==="cash"?"Efectivo":"Banco",cop(x.amount),`<div class="actions">${x.reversedAt?reversalBadge(x):x.legacy?allowed("cash","Clasificar gasto","classify-expense","edit","small",x.id):badge("Registrado","blue")}${button("Comprobante","print-expense","print","small",x.key)}${!x.reversedAt?reversalButton(x.kind,x.id):""}</div>`])).join("")));
+}
+function expenseModal(cashEntryId) {
+  const original=cashEntryId?S.cashEntries.find(x=>x.id===cashEntryId):null,shift=currentShift();
+  if(cashEntryId&&!original)throw new Error("Salida de caja no encontrada.");
+  modal(original?"Clasificar gasto ya pagado":"Registrar gasto del taller",`<div class="form-grid">${select("category","Categoría",expenseCategories,"Otros")}${field("expenseDate","Fecha del gasto","date",original?dayKey(original.at):today(),`required max="${today()}"`)}<div class="span-2">${field("concept","Concepto del gasto","text",original?.note||"",'required maxlength="1000" placeholder="Ej. Energía del taller, transporte o reparación de herramienta"')}</div>${moneyField("amount","Valor pagado · COP",original?-original.amount:"")}${select("method","Pagado con",[["cash","Efectivo de caja"],["bank","Banco / transferencia"]],original||shift?"cash":"bank")}<div class="span-2">${field("beneficiary","Pagado a (opcional)","text","",'maxlength="120"')}</div><div class="span-2">${field("reference","Comprobante / referencia de pago","text","",'maxlength="200"')}</div><div id="expense-preview" class="span-2" data-classification="${!!original}"></div></div>`,(b,form,key)=>mutate(original?"expense.classify":"expense.create",{...b,method:original?"cash":b.method,...(original?{cashEntryId:original.id}:{shiftId:shift?.id??null})},key),original?"Guardar clasificación sin descontar":"Registrar gasto");
+  if(original){$("#modal-form").elements.method.disabled=true;$("#modal-form").elements.amount.readOnly=true;}
+  $("#modal-form").elements.amount.setAttribute("min","1");
+  updateExpensePreview();
+}
+function updateExpensePreview() {
+  const form=$("#modal-form"),target=$("#expense-preview",form);
+  if(!target)return;
+  const classified=target.dataset.classification==="true",cash=form.elements.method.value==="cash";
+  form.elements.reference.required=!cash;
+  if(classified)target.innerHTML=notice("Este dinero ya salió de caja","Solo vas a clasificar la salida existente. El saldo y el cierre original no se modifican.","blue");
+  else if(!cash)target.innerHTML=notice("Pago bancario","Se registra el gasto y su soporte. No descuenta efectivo ni ejecuta una transferencia en tu banco.","blue");
+  else if(!currentShift())target.innerHTML=notice("Abre un turno antes de pagar en efectivo","No hay una caja abierta para registrar esta salida.","amber");
+  else {const available=expectedCash(currentShift()),amount=numericValue(form.elements.amount);target.innerHTML=`<div class="calculator">${row("Efectivo disponible",cop(available))}${row("Efectivo después del gasto",cop(available-amount))}${amount>available?'<p class="error">El gasto supera el efectivo disponible.</p>':""}</div>`;}
+}
+function printExpense(key) {
+  const x=expenseRows().find(x=>x.key===key);if(!x)throw new Error("Gasto no encontrado.");
+  showReceipt("Comprobante de gasto",receiptHeader("COMPROBANTE DE GASTO")+`<hr><strong>${E(x.code)}</strong>${x.reversedAt?" · REVERSADO":""}<br>Fecha del gasto: ${dateLabel(x.expenseDate)}<br>Registrado: ${dt(x.at)}<br>Responsable: ${E(x.actor)}<hr>Categoría: ${E(x.category)}<p class="receipt-pre">${E(x.concept)}</p>Pagado a: ${E(x.beneficiary||"No indicado")}<br>Medio: ${x.method==="cash"?"Efectivo de caja":"Banco / transferencia"}<br>Soporte: ${E(x.reference||"No indicado")}<hr>${row("VALOR PAGADO",cop(x.amount))}<small>${x.method==="cash"?"La salida está registrada en su turno de caja.":"Este gasto no descuenta efectivo de caja."}</small>`);
+}
+function exportExpenses() {
+  csv("gastos-taller",["Comprobante","Fecha gasto","Fecha registro","Categoría","Concepto","Pagado a","Medio","Valor COP","Soporte","Responsable","Turno de caja","Estado"],filteredExpenses().map(x=>[x.code,x.expenseDate,dt(x.at),x.category,x.concept,x.beneficiary,x.method==="cash"?"Efectivo":"Banco",x.amount,x.reference,x.actor,find("shifts",x.shiftId)?.code||"",x.reversedAt?"Reversado":x.legacy?"Sin clasificar":"Registrado"]));
+}
 function cashPage() {
   const shift = currentShift(),
     gold = cashMetals();
@@ -1720,7 +1768,7 @@ function cashPage() {
         : allowed("cash", "Abrir turno", "open-shift", "plus", "primary"),
     ) +
     (shift
-      ? `<div class="kpis">${kpi("Efectivo esperado", cop(expectedCash(shift)), shift.code + " · " + shift.actor, "cash", true)}${kpi("Base inicial de efectivo", cop(shift.opening), "Apertura: " + openingModeLabel(shift), "cash")}${kpi("Movimientos del turno", S.cashEntries.filter((x) => x.shiftId === shift.id).length, "Cobros, gastos y pagos", "file")}${kpi("Lotes de metal en caja", gold.length, "Base inicial y recaudo · por ley", "gold")}</div><div class="actions section-gap">${badge("Apertura en " + openingModeLabel(shift), "blue")}${allowed("cash", "Ingreso / gasto de caja", "cash-entry", "plus")}${button("Imprimir resumen", "print-shift", "print", "", shift.id)}</div><div class="grid two section-gap">${card("Metal en caja", "Base de apertura y metal recibido como pago.", gold.length ? gold.map((x) => row(x.metal + " · ley " + number(x.purity), weight(x.mg)) + `<p class="balance-details muted">Base en caja: ${weight(x.openingMg)} · Recaudo: ${weight(x.receivedMg)}<br>${fine(x.fineUg)}</p>`).join("") : empty("No hay metal en caja", "La base de oro y los cobros en metal aparecerán aquí."))}${card(
+      ? `<div class="kpis">${kpi("Efectivo esperado", cop(expectedCash(shift)), shift.code + " · " + shift.actor, "cash", true)}${kpi("Base inicial de efectivo", cop(shift.opening), "Apertura: " + openingModeLabel(shift), "cash")}${kpi("Movimientos del turno", S.cashEntries.filter((x) => x.shiftId === shift.id).length, "Cobros, gastos y pagos", "file")}${kpi("Lotes de metal en caja", gold.length, "Base inicial y recaudo · por ley", "gold")}</div><div class="actions section-gap">${badge("Apertura en " + openingModeLabel(shift), "blue")}${allowed("cash", "Registrar gasto", "new-expense", "plus") + allowed("cash", "Ingreso adicional", "cash-entry", "plus")}${button("Imprimir resumen", "print-shift", "print", "", shift.id)}</div><div class="grid two section-gap">${card("Metal en caja", "Base de apertura y metal recibido como pago.", gold.length ? gold.map((x) => row(x.metal + " · ley " + number(x.purity), weight(x.mg)) + `<p class="balance-details muted">Base en caja: ${weight(x.openingMg)} · Recaudo: ${weight(x.receivedMg)}<br>${fine(x.fineUg)}</p>`).join("") : empty("No hay metal en caja", "La base de oro y los cobros en metal aparecerán aquí."))}${card(
           "Movimientos de efectivo",
           shift.code,
           table(
@@ -1733,7 +1781,7 @@ function cashPage() {
                   dt(x.at),
                   E(measurementNote(x.note)),
                   `<span style="color:${x.amount < 0 ? "var(--red)" : "var(--green)"}">${x.amount < 0 ? "−" : "+"}${cop(Math.abs(x.amount))}</span>`,
-                  x.reversedAt ? reversalBadge(x) : x.ref === "CAJA" ? reversalButton("cash",x.id) : "",
+                  x.reversedAt ? reversalBadge(x) : x.expenseId ? reversalButton("expense",x.expenseId) : x.ref === "CAJA" ? reversalButton("cash",x.id) : "",
                 ]),
               )
               .join(""),
@@ -1932,7 +1980,10 @@ function reportsPage() {
     liquidations = S.orders.filter((o) => o.returned && inRange(o.returned.at)),
     gross = sales.reduce((v, o) => v + total(o), 0),
     tax = sales.reduce((v, o) => v + o.tax, 0),
-    cost = sales.reduce((v, o) => v + estimatedCost(o), 0);
+    cost = sales.reduce((v, o) => v + estimatedCost(o), 0),
+    expenses = (S.expenses||[]).filter(x=>!x.reversedAt&&x.expenseDate>=from&&x.expenseDate<=to),
+    expenseTotal = expenses.reduce((v,x)=>v+x.amount,0),
+    unclassified = expenseRows().filter(x=>x.legacy&&!x.reversedAt&&x.expenseDate>=from&&x.expenseDate<=to).reduce((v,x)=>v+x.amount,0);
   return (
     head(
       "DECISIONES CON FUNDAMENTO",
@@ -1941,7 +1992,7 @@ function reportsPage() {
       button("Ventas CSV", "export-sales", "download") +
         button("Auditoría CSV", "export-audit", "download"),
     ) +
-    `<div class="filters report-filters card">${field("reportFrom", "Desde", "date", from, 'data-filter="reportFrom"')}${field("reportTo", "Hasta", "date", to, 'data-filter="reportTo"')}</div><div class="kpis">${kpi("Ventas entregadas", cop(gross), sales.length + " comprobantes comerciales", "chart", true)}${kpi("Impuestos registrados", cop(tax), "Según presupuesto de cada orden", "file")}${kpi("Costo operativo estimado", cop(cost), "Tarifa histórica + insumos + orfebre", "gold")}${kpi("Margen estimado", cop(gross - tax - cost), "Antes de gastos generales", "chart")}</div><div class="section-gap">${notice("Cómo se estima el costo", "Metal propio consumido (incluida su merma) a la tarifa guardada al recibir la orden, más insumos y honorarios. No equivale a contabilidad fiscal ni incluye todos los gastos del negocio.", "blue")}</div><section class="card table-card"><div class="card-head"><h2>Rendimiento de orfebres en el período</h2></div>${table(
+    `<div class="filters report-filters card">${field("reportFrom", "Desde", "date", from, 'data-filter="reportFrom"')}${field("reportTo", "Hasta", "date", to, 'data-filter="reportTo"')}</div><div class="kpis">${kpi("Ventas entregadas", cop(gross), sales.length + " comprobantes comerciales", "chart", true)}${kpi("Impuestos registrados", cop(tax), "Según presupuesto de cada orden", "file")}${kpi("Costo operativo estimado", cop(cost), "Tarifa histórica + insumos + orfebre", "gold")}${kpi("Margen estimado", cop(gross - tax - cost), "Antes de gastos generales", "chart")}${kpi("Gastos del taller", cop(expenseTotal), "Clasificados · sin reversados", "cash")}${kpi("Resultado después de gastos", cop(gross - tax - cost - expenseTotal), "Estimado del período", "chart")}</div><div class="section-gap">${notice("Cómo se estima el costo", "Metal propio consumido (incluida su merma) a la tarifa guardada al recibir la orden, más insumos y honorarios. No equivale a contabilidad fiscal ni incluye todos los gastos del negocio.", "blue")}</div>${unclassified ? `<div class="section-gap">${notice("Salidas de caja pendientes de clasificar", "Hay " + cop(unclassified) + " en salidas anteriores sin clasificar. Revisa Gastos del taller; todavía no se restan del resultado después de gastos.", "amber")}</div>` : ""}<section class="card table-card"><div class="card-head"><h2>Rendimiento de orfebres en el período</h2></div>${table(
       [
         "Orfebre",
         "Órdenes liquidadas",
@@ -2032,6 +2083,7 @@ function usersPage() {
   );
 }
 const reversalTypes = [
+  ["expense","Gasto del taller"],
   ["purchase","Compra de metal"],["supplierPayment","Pago a proveedor"],
   ["sale","Entrega / venta al cliente"],["payment","Cobro o devolución al cliente"],
   ["order","Orden sin producción ni abonos"],["cash","Ingreso / gasto manual de caja"],
@@ -2045,11 +2097,12 @@ const reversalBadge = (x) => x.reversedAt ? badge("Reversada", "red") : "";
 function reversalCandidates(type) {
   let rows=[];
   if(type==="purchase")rows=S.purchases.filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.document+" · "+cop(x.total)]);
+  if(type==="expense")rows=(S.expenses||[]).filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.concept+" · "+cop(x.amount)]);
   if(type==="supplierPayment")rows=S.supplierPayments.filter(x=>!x.reversedAt).map(x=>[x.id,(find("purchases",x.purchaseId)?.code||"")+" · "+cop(x.amount)+" · "+x.reference]);
   if(type==="sale")rows=S.orders.filter(x=>x.status==="delivered"&&x.invoice&&x.type!=="Producción propia").map(x=>[x.id,x.invoice+" · "+x.code+" · "+client(x)]);
   if(type==="payment")rows=S.payments.filter(x=>!x.voidedAt&&!x.reversedAt).map(x=>[x.id,x.code+" · "+cop(x.applied)+" · "+(find("orders",x.orderId)?.code||"")]);
   if(type==="order")rows=S.orders.filter(x=>x.status==="received").map(x=>[x.id,x.code+" · "+x.description]);
-  if(type==="cash")rows=S.cashEntries.filter(x=>x.ref==="CAJA"&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.note+" · "+cop(x.amount)]);
+  if(type==="cash")rows=S.cashEntries.filter(x=>x.ref==="CAJA"&&!x.expenseId&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.note+" · "+cop(x.amount)]);
   if(type==="ledger")rows=S.ledger.filter(x=>["TRASLADO","CONCILIACIÓN"].includes(x.ref)&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.ref+" · "+x.metal+" · "+weight(x.mg)]);
   if(type==="material")rows=S.materialMoves.filter(x=>!x.reversedAt&&!x.reversalId).map(x=>[x.id,dt(x.at)+" · "+(find("materials",x.materialId)?.name||"")+" · "+quantity(x.quantity)+" · "+x.note]);
   if(type==="stockTransfer")rows=S.stock.flatMap(x=>x.transfers.filter(t=>!t.reversedAt).map(t=>[t.id,t.code+" · "+x.sku+" · "+t.destination]));
@@ -2067,7 +2120,7 @@ function reversalsPage() {
     card("Historial de reversiones","Se conserva también en las copias de seguridad y la auditoría.",table(["Fecha / responsable","Operación","Resultado","Motivo / soporte"],[...(S.reversals||[])].reverse().map(x=>tr([dt(x.at)+"<small>"+E(x.actor)+"</small>",E(reversalTypes.find(t=>t[0]===x.type)?.[1]||x.type)+"<small>"+E(reversalReference(x))+"</small>",E(x.summary),E(x.reason)+"<small>"+E(x.reference)+"</small>"])).join("")));
 }
 function reversalReference(r) {
-  const collections={purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
+  const collections={expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
   if(r.type==="stockTransfer")return S.stock.flatMap(x=>x.transfers).find(x=>x.id===r.targetId)?.code||r.targetId;
   const source=S[collections[r.type]]?.find(x=>x.id===r.targetId);
   return r.original?.invoice||source?.code||source?.sku||source?.reference||source?.note||r.targetId;
@@ -2202,6 +2255,8 @@ function assistantPage() {
 }
 function actionLabel(a) {
   const labels = {
+    "expense.create":"Gasto registrado",
+    "expense.classify":"Gasto clasificado sin nueva salida",
     "operation.reverse": "Operación reversada",
     "category.delete": "Categoría eliminada",
     "category.save": "Categoría guardada",
@@ -3432,20 +3487,31 @@ async function handleAction(action, id, el) {
       break;
     case "cash-entry":
       simpleModal(
-        "Ingreso / gasto de caja",
+        "Ingreso adicional de caja",
         "cash.entry",
         `<div class="form-grid">${select(
           "type",
           "Movimiento",
           [
-            ["expense", "Gasto / salida"],
             ["income", "Ingreso adicional"],
           ],
-          "expense",
+          "income",
         )}${moneyField("amount", "Importe · COP", "")}<div class="span-2">${field("note", "Concepto y soporte", "text", "", 'required maxlength="1000"')}</div></div>`,
         {},
         "Registrar movimiento",
       );
+      break;
+    case "new-expense":
+      expenseModal();
+      break;
+    case "classify-expense":
+      expenseModal(id);
+      break;
+    case "print-expense":
+      printExpense(id);
+      break;
+    case "export-expenses":
+      exportExpenses();
       break;
     case "transfer-metal":
       simpleModal(
@@ -3882,6 +3948,7 @@ function updateModalCalculations(el) {
   const f = $("#modal-form");
   if (!f) return;
   const b = inputData(f);
+  if($("#expense-preview",f))updateExpensePreview();
   if (el.name?.startsWith("orderMetalPrice-")) updateInlineMetalTotal(f);
   if ($("#labor-preview", f)) updateLaborPreview();
   if ($("#opening-preview")) updateShiftOpening();

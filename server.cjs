@@ -460,6 +460,7 @@ function createApp(options = {}) {
                   .all()
               : [],
             accounts: D.ACCOUNTS,
+            expenseCategories: D.EXPENSE_CATEGORIES,
             permissions: D.ROLES[a.role],
           });
         }
@@ -471,8 +472,8 @@ function createApp(options = {}) {
           D.validateState(next);
           let bankDelta=0;
           if(data.type==="payment")bankDelta=-(before.payments.find(x=>x.id===data.id)?.bank||0);
-          if(["supplierPayment","settlement"].includes(data.type)){
-            const payment=(data.type==="supplierPayment"?before.supplierPayments:before.settlements).find(x=>x.id===data.id);
+          if(["supplierPayment","settlement","expense"].includes(data.type)){
+            const payment=(data.type==="supplierPayment"?before.supplierPayments:data.type==="expense"?(before.expenses||[]):before.settlements).find(x=>x.id===data.id);
             if(payment?.method==="bank")bankDelta=payment.amount;
           }
           return await json(res,200,{

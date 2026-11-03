@@ -16,6 +16,16 @@ module.exports = function reverse(s, b, a, D) {
   const cashBack=(amount,label)=>cash(s,a,openShift(s),amount,label+": "+reason,ref);
   const inverse=(x)=>move(s,a,x.to,x.from,x.mg,x.metal,x.purity,x.owner,ref,reason);
   switch(b.type) {
+    case "expense": {
+      const expense=get(s,"expenses",b.id);live(expense);paidAmount(expense);bankProof(expense.method);
+      if(expense.method==="cash") {
+        const entry=get(s,"cashEntries",expense.cashEntryId);
+        assert(entry.expenseId===expense.id&&entry.amount===-expense.amount&&!entry.reversedAt,"El gasto no concilia con su salida original.");
+        cashBack(expense.amount,"Reversión de gasto "+expense.code);mark(entry);
+      }
+      mark(expense);record.summary="Gasto "+expense.code+" reversado; devolución registrada por su medio original.";
+      break;
+    }
     case "purchase": {
       const p=get(s,"purchases",b.id);live(p);
       assert(!s.supplierPayments.some(x=>x.purchaseId===p.id&&!x.reversedAt),"Reversa primero los pagos de esta compra.");
@@ -112,6 +122,7 @@ module.exports = function reverse(s, b, a, D) {
     case "cash": {
       const x=get(s,"cashEntries",b.id);live(x);
       assert(x.ref==="CAJA","Los movimientos automáticos se revierten desde su operación original.");
+      assert(!x.expenseId,"Esta salida corresponde a un gasto clasificado. Reversa el gasto original.");
       money(Math.abs(x.amount),"Importe del movimiento original");assert(x.amount!==0,"El movimiento original no tiene importe.");
       cashBack(-x.amount,"Reversión de movimiento manual de caja");mark(x);
       record.summary="Movimiento manual compensado en el turno abierto. Los cierres anteriores se conservan.";
