@@ -51,6 +51,21 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     await page.locator('[data-filter="expenseMethod"]').selectOption("bank");assert.match(await page.locator('#page').innerText(),/Arriendo pagado por banco/);assert.doesNotMatch(await page.locator('#page table').innerText(),/Transporte anterior/);
     await page.locator('[data-filter="expenseMethod"]').selectOption("");
     for(const width of [390,320]){await page.setViewportSize({width,height:950});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Historial de gastos "+width);}
+    const today=require("../domain.cjs").day(),monthStart=today.slice(0,7)+"-01";
+    const previousMonth=new Date(Date.parse(monthStart+"T12:00:00Z")-86400000).toISOString().slice(0,10);
+    await act("expense.create",{category:"Otros",concept:"Gasto de un mes anterior",amount:1000,method:"bank",reference:"TR-ANTERIOR",expenseDate:previousMonth});
+    await page.reload();await page.locator('#page h1').waitFor();
+    assert.equal(await page.locator('[data-filter="expenseFrom"]').inputValue(),"");assert.equal(await page.locator('[data-filter="expenseTo"]').inputValue(),"");
+    assert.match(await page.locator('#page table').innerText(),/Gasto de un mes anterior/);assert.match(await page.locator('#page table').innerText(),/Energía del taller/);
+    const beforeFiltering=await state(),allDownload=page.waitForEvent("download");await page.locator('[data-action="export-expenses"]').click();
+    const historyBook=new(require("../exceljs.min.js").Workbook)();await historyBook.xlsx.load(fs.readFileSync(await(await allDownload).path()));
+    assert.ok(historyBook.worksheets[0].getColumn(5).values.includes("Gasto de un mes anterior"),"Excel incluye los meses anteriores por defecto");
+    await page.locator('[data-filter="expenseFrom"]').fill(monthStart);assert.doesNotMatch(await page.locator('#page table').innerText(),/Gasto de un mes anterior/);
+    await page.locator('[data-filter="expenseFrom"]').fill("");assert.match(await page.locator('#page table').innerText(),/Gasto de un mes anterior/);
+    await page.locator('[data-filter="expenseTo"]').fill(previousMonth);assert.match(await page.locator('#page table').innerText(),/Gasto de un mes anterior/);assert.doesNotMatch(await page.locator('#page table').innerText(),/Energía del taller/);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Filtros e historial móvil");
+    await page.locator('[data-action="reset-expense-filters"]').click();assert.equal(await page.locator('[data-filter="expenseTo"]').inputValue(),"");assert.match(await page.locator('#page table').innerText(),/Energía del taller/);
+    assert.deepEqual(await state(),beforeFiltering,"Consultar y exportar el historial no altera caja ni gastos");
     await act("user.create",{name:"Producción",username:"produccion",password:"1234",role:"produccion"});
     const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"produccion",password:"1234"}});
     const restrictedPage=await restricted.newPage();await restrictedPage.goto(base+"/#expenses");await restrictedPage.locator('#page').waitFor();assert.equal(await restrictedPage.locator('[data-nav="expenses"]').count(),0);assert.match(await restrictedPage.locator('#page').innerText(),/Acceso restringido/);

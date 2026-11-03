@@ -1736,14 +1736,16 @@ function expenseRows() {
   return [...recorded,...previous].sort((a,b)=>a.at.localeCompare(b.at));
 }
 function filteredExpenses() {
-  const from=filters.expenseFrom||today().slice(0,7)+"-01",to=filters.expenseTo||today();
-  return expenseRows().filter(x=>x.expenseDate>=from&&x.expenseDate<=to&&(!filters.expenseMethod||x.method===filters.expenseMethod)&&(!filters.expenseCategory||x.category===filters.expenseCategory));
+  const from=filters.expenseFrom||"",to=filters.expenseTo||"";
+  return expenseRows().filter(x=>(!from||x.expenseDate>=from)&&(!to||x.expenseDate<=to)&&(!filters.expenseMethod||x.method===filters.expenseMethod)&&(!filters.expenseCategory||x.category===filters.expenseCategory));
 }
 function expensesPage() {
   const rows=filteredExpenses(),active=rows.filter(x=>!x.reversedAt&&!x.legacy),sum=items=>items.reduce((v,x)=>v+x.amount,0);
+  const filtered=!!(filters.expenseFrom||filters.expenseTo||filters.expenseMethod||filters.expenseCategory);
   return head("EL DÍA A DÍA DEL TALLER","Gastos del taller","Registra lo pagado, conserva el soporte y revisa de dónde salió el dinero.",allowed("cash","Registrar gasto","new-expense","plus","primary")+button("Exportar Excel","export-expenses","download"))+
     notice("Una sola salida de dinero","Un gasto en efectivo descuenta la caja abierta. Un gasto bancario no toca el efectivo. Las salidas antiguas se pueden clasificar sin descontarlas otra vez.","blue")+
-    `<div class="filters card section-gap">${field("expenseFrom","Desde","date",filters.expenseFrom||today().slice(0,7)+"-01",'data-filter="expenseFrom"')}${field("expenseTo","Hasta","date",filters.expenseTo||today(),'data-filter="expenseTo"')}<label class="field"><span>Medio de pago</span><select data-filter="expenseMethod">${[["","Todos"],["cash","Efectivo"],["bank","Banco"]].map(x=>option(x[0],x[1],filters.expenseMethod||"")).join("")}</select></label><label class="field"><span>Categoría</span><select data-filter="expenseCategory">${[["","Todas"],...expenseCategories.map(x=>[x,x]),["Sin clasificar","Sin clasificar"]].map(x=>option(x[0],x[1],filters.expenseCategory||"")).join("")}</select></label></div>`+
+    `<div class="filters card section-gap">${field("expenseFrom","Desde (opcional)","date",filters.expenseFrom||"",'data-filter="expenseFrom"')}${field("expenseTo","Hasta (opcional)","date",filters.expenseTo||"",'data-filter="expenseTo"')}<label class="field"><span>Medio de pago</span><select data-filter="expenseMethod">${[["","Todos"],["cash","Efectivo"],["bank","Banco"]].map(x=>option(x[0],x[1],filters.expenseMethod||"")).join("")}</select></label><label class="field"><span>Categoría</span><select data-filter="expenseCategory">${[["","Todas"],...expenseCategories.map(x=>[x,x]),["Sin clasificar","Sin clasificar"]].map(x=>option(x[0],x[1],filters.expenseCategory||"")).join("")}</select></label>${filtered?button("Ver todo el historial","reset-expense-filters","refresh","small"):""}</div>`+
+    `<p class="muted section-gap">${filtered?"Mostrando "+number(rows.length)+" de "+number(expenseRows().length)+" registros según los filtros seleccionados.":"Mostrando todo el historial de gastos, incluidos los meses anteriores."}</p>`+
     `<div class="kpis">${kpi("Gastos clasificados",cop(sum(active)),"Del período · sin reversados","cash",true)}${kpi("Pagados desde caja",cop(sum(active.filter(x=>x.method==="cash"))),"Ya descontados del efectivo","cash")}${kpi("Pagados por banco",cop(sum(active.filter(x=>x.method==="bank"))),"No descuentan caja","file")}${kpi("Salidas sin clasificar",cop(sum(rows.filter(x=>x.legacy&&!x.reversedAt))),"Movimientos anteriores de caja","chart")}</div>`+
     card("Historial de gastos y salidas","Las compras de metal y los pagos a proveedores u orfebres se registran en sus módulos, para no duplicar salidas.",table(["Fecha / comprobante","Categoría / concepto","Pagado a / soporte","Medio","Valor · COP","Estado / acciones"],[...rows].reverse().map(x=>tr([dateLabel(x.expenseDate)+"<small>"+E(x.code)+" · "+E(x.actor)+"</small>",E(x.category)+"<small>"+E(x.concept)+"</small>",E(x.beneficiary||"—")+"<small>"+E(x.reference)+"</small>",x.method==="cash"?"Efectivo":"Banco",cop(x.amount),`<div class="actions">${x.reversedAt?reversalBadge(x):x.legacy?allowed("cash","Clasificar gasto","classify-expense","edit","small",x.id):badge("Registrado","blue")}${button("Comprobante","print-expense","print","small",x.key)}${!x.reversedAt?reversalButton(x.kind,x.id):""}</div>`])).join("")));
 }
@@ -1770,7 +1772,7 @@ function printExpense(key) {
   showReceipt("Comprobante de gasto",receiptHeader("COMPROBANTE DE GASTO")+`<hr><strong>${E(x.code)}</strong>${x.reversedAt?" · REVERSADO":""}<br>Fecha del gasto: ${dateLabel(x.expenseDate)}<br>Registrado: ${dt(x.at)}<br>Responsable: ${E(x.actor)}<hr>Categoría: ${E(x.category)}<p class="receipt-pre">${E(x.concept)}</p>Pagado a: ${E(x.beneficiary||"No indicado")}<br>Medio: ${x.method==="cash"?"Efectivo de caja":"Banco / transferencia"}<br>Soporte: ${E(x.reference||"No indicado")}<hr>${row("VALOR PAGADO",cop(x.amount))}<small>${x.method==="cash"?"La salida está registrada en su turno de caja.":"Este gasto no descuenta efectivo de caja."}</small>`);
 }
 function exportExpenses() {
-  if ((filters.expenseFrom || today().slice(0,7)+"-01") > (filters.expenseTo || today())) throw new Error("La fecha inicial no puede superar la fecha final.");
+  if (filters.expenseFrom && filters.expenseTo && filters.expenseFrom > filters.expenseTo) throw new Error("La fecha inicial no puede superar la fecha final.");
   return excel("gastos-taller",["Comprobante","Fecha gasto","Fecha registro","Categoría","Concepto","Pagado a","Medio","Valor COP","Soporte","Responsable","Turno de caja","Estado"],filteredExpenses().map(x=>[x.code,window.TallerExcel.date(x.expenseDate),window.TallerExcel.date(x.at),x.category,x.concept,x.beneficiary,x.method==="cash"?"Efectivo":"Banco",x.amount,x.reference,x.actor,find("shifts",x.shiftId)?.code||"",x.reversedAt?"Reversado":x.legacy?"Sin clasificar":"Registrado"]));
 }
 function cashPage() {
@@ -3583,6 +3585,10 @@ async function handleAction(action, id, el) {
         {},
         "Registrar movimiento",
       );
+      break;
+    case "reset-expense-filters":
+      for (const key of ["expenseFrom","expenseTo","expenseMethod","expenseCategory"]) delete filters[key];
+      render();
       break;
     case "new-expense":
       expenseModal();
