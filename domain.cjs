@@ -299,6 +299,7 @@ function cash(s, a, shift, amount, note, ref) {
     cashExpected(s, shift) + amount >= 0,
     "La caja no tiene efectivo suficiente.",
   );
+  money(cashExpected(s, shift) + amount, "Saldo resultante de caja");
   s.cashEntries.push({
     id: id(),
     at: now(),
@@ -371,7 +372,7 @@ function execute(s, action, b, a) {
   switch (action) {
     case "operation.reverse": {
       permit(a,"adjust");
-      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity});
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity,money});
     }
     case "category.delete": {
       permit(a, "settings");
@@ -836,6 +837,8 @@ function execute(s, action, b, a) {
         );
       o.status = "cancelled";
       timeline(o, a, "Anulada y custodia devuelta: " + reason);
+      s.reversals??=[];
+      s.reversals.push({id:id(),type:"order",targetId:o.id,at:now(),actor:a.name,reason,reference:str(b.reference,"Soporte de devolución",200,false),summary:"Orden "+o.code+" anulada sin producción ni saldo abonado; custodia devuelta."});
       return o;
     }
     case "payment.create": {
@@ -961,6 +964,8 @@ function execute(s, action, b, a) {
       p.voidedBy = a.name;
       p.voidReason = reason;
       timeline(o, a, "Cobro " + p.code + " anulado. " + reason);
+      s.reversals??=[];
+      s.reversals.push({id:id(),type:"payment",targetId:p.id,at:p.voidedAt,actor:a.name,reason,reference:str(b.reference,"Soporte de devolución",200,false),summary:"Cobro "+p.code+" anulado en su turno original con devolución de los medios recibidos."});
       return p;
     }
     case "payment.refund": {

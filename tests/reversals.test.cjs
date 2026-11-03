@@ -128,6 +128,46 @@ test("Producción: solo deshace asignaciones inmediatas y aprobaciones; conserva
   const weights=JSON.stringify(o.returned);reverse("quality",o.id);
   assert.equal(o.status,"quality");assert.equal(JSON.stringify(o.returned),weights);
 });
+test("Revisión: una compensación no puede desbordar el saldo que admite el cierre de caja",()=>{
+  const f=fixture(),{s,act,blocked}=f;
+  act("cash.entry",{type:"expense",amount:100,note:"Gasto"});const expense=s.cashEntries.at(-1);
+  act("cash.entry",{type:"income",amount:1e12-D.cashExpected(s,s.shifts[0]),note:"Base en el límite"});
+  assert.equal(D.cashExpected(s,s.shifts[0]),1e12);
+  blocked("cash",expense.id,/Saldo resultante de caja/);
+  assert.throws(()=>act("cash.entry",{type:"income",amount:1,note:"Desborde"}),/Saldo resultante de caja/);
+  f.close();assert.equal(s.shifts[0].counted,1e12);
+});
+test("Revisión: las entradas de insumos con consumos posteriores se revierten en orden",()=>{
+  const f=fixture(),{s,act,reverse,blocked}=f,o=f.order();
+  const m=act("material.save",{name:"Piedra",unit:"pieza",quantity:20,unitCost:100,min:0});
+  act("material.restock",{id:m.id,quantity:5,unitCost:200,note:"Nueva entrada"});const entry=s.materialMoves.at(-1);
+  const usage=act("material.use",{orderId:o.id,materialId:m.id,quantity:1});
+  assert.equal(m.quantity,24);
+  blocked("material",entry.id,/consumos posteriores/);
+  reverse("material",usage.id);reverse("material",entry.id);
+  assert.equal(m.quantity,20);assert.equal(m.unitCost,100);
+});
+test("Revisión: referencias duplicadas o incompletas no fabrican metal al reversar una entrega",()=>{
+  const f=fixture(),{s,act}=f,o=f.order();f.ready(o,1);
+  act("payment.create",{orderId:o.id,cash:200000});act("order.deliver",{id:o.id,acceptance:"Cliente"});
+  for(const ids of [[],[o.deliveryLedgerIds[0],o.deliveryLedgerIds[0]],[o.deliveryLedgerIds[0]]]) {
+    const copy=structuredClone(s);copy.orders[0].deliveryLedgerIds=ids;
+    assert.throws(()=>D.execute(copy,"operation.reverse",{type:"sale",id:o.id,confirmed:true,reason:"Revisión"},a),/completos y únicos|no concilian/);
+  }
+  const assign=fixture(),job=assign.order();assign.act("order.assign",{id:job.id,smithId:assign.smith.id,customerWeight:2,ownWeight:0});
+  const copy=structuredClone(assign.s);copy.orders[0].assignmentLedgerIds.push(copy.orders[0].assignmentLedgerIds[0]);
+  assert.throws(()=>D.execute(copy,"operation.reverse",{type:"assignment",id:job.id,confirmed:true,reason:"Revisión"},a),/duplicados/);
+});
+test("Revisión: las anulaciones existentes también quedan en el historial global, sin duplicar registros",()=>{
+  const f=fixture(),{s,act,reverse}=f;
+  const o=f.order();act("order.cancel",{id:o.id,reason:"Cliente desistió"});
+  assert.equal(s.reversals.length,1);assert.equal(s.reversals[0].type,"order");
+  const job=f.order(),p=act("payment.create",{orderId:job.id,cash:10000});
+  act("payment.void",{id:p.id,reason:"Cobro equivocado"});
+  assert.equal(s.reversals.length,2);assert.equal(s.reversals[1].targetId,p.id);
+  reverse("order",job.id);assert.equal(s.reversals.length,3);
+  assert.equal(s.reversals.filter(x=>x.targetId===job.id).length,1);
+});
 test("API: vista previa sin cambios, concurrencia, idempotencia y fallos atómicos",async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),"aurea-reversas-")),app=createApp({dataDir:dir});
   await new Promise(r=>app.server.listen(0,"127.0.0.1",r));const base="http://127.0.0.1:"+app.server.address().port;
@@ -146,6 +186,10 @@ test("API: vista previa sin cambios, concurrencia, idempotencia y fallos atómic
     const after=await state();assert.equal(after.reversals.length,1);assert.equal(after.cashEntries.length,before.cashEntries.length+1);
     assert.equal((await act("operation.reverse",payload)).status,409);assert.deepEqual(await state(),after);
     const missing={type:"purchase",id:randomUUID(),reason:"No existe",confirmed:true};assert.equal((await act("operation.reverse",missing)).status,404);assert.deepEqual(await state(),after);
+    await act("cash.entry",{type:"expense",amount:1000,note:"Dos aprobaciones"});
+    const concurrent=await state(),target=concurrent.cashEntries.at(-1),request={type:"cash",id:target.id,reason:"Revisado por dos sesiones",confirmed:true};
+    const races=await Promise.all([act("operation.reverse",request,randomUUID(),concurrent.revision),act("operation.reverse",request,randomUUID(),concurrent.revision)]);
+    assert.deepEqual(races.map(x=>x.status).sort(),[200,409]);assert.equal((await state()).reversals.length,2);
     // El metal se intentaría devolver antes del efectivo: el fallo de caja no debe guardar nada.
     const f=fixture(),o=f.order();
     const payment=f.act("payment.create",{orderId:o.id,cash:20000,goldWeight:1,metal:"oro",purity:750,rate:100000});

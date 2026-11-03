@@ -1293,8 +1293,8 @@ function orderDetail(o) {
         '</small></span><div class="actions">' +
         cop(x.applied) +
         button("Imprimir", "print-payment", "print", "small", x.id) +
-        (!x.refund && !x.voidedAt && can("adjust") && active(o)
-          ? button("Anular", "void-payment", "", "small danger", x.id)
+        (!x.voidedAt && can("adjust") && active(o)
+          ? reversalButton("payment",x.id)
           : "") +
         "</div></div>",
     )

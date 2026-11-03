@@ -1,6 +1,6 @@
 "use strict";
 module.exports = function reverse(s, b, a, D) {
-  const {assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity}=D;
+  const {assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity,money}=D;
   assert(b.confirmed === true, "Confirma la devolución física o la corrección real antes de reversar.");
   const reason=str(b.reason,"Motivo de reversión",1000);
   const reference=str(b.reference,"Soporte de devolución",200,false);
@@ -9,6 +9,10 @@ module.exports = function reverse(s, b, a, D) {
   const mark=(x)=>Object.assign(x,{reversedAt:record.at,reversedBy:a.name,reverseReason:reason,reversalId:record.id});
   const live=(x)=>assert(!x.reversedAt,"La operación ya fue reversada.",409);
   const bankProof=(method)=>assert(method!=="bank" || reference,"Registra el soporte de la devolución bancaria.");
+  const paidAmount=(p)=>{
+    assert(["cash","bank"].includes(p.method),"El registro no conserva un medio de pago válido.");
+    money(p.amount,"Importe del pago original");assert(p.amount>0,"El pago original debe ser mayor que cero.");
+  };
   const cashBack=(amount,label)=>cash(s,a,openShift(s),amount,label+": "+reason,ref);
   const inverse=(x)=>move(s,a,x.to,x.from,x.mg,x.metal,x.purity,x.owner,ref,reason);
   switch(b.type) {
@@ -21,12 +25,14 @@ module.exports = function reverse(s, b, a, D) {
     }
     case "supplierPayment": {
       const p=get(s,"supplierPayments",b.id);live(p);bankProof(p.method);
+      paidAmount(p);
       if(p.method==="cash")cashBack(p.amount,"Devolución de pago a proveedor");
       mark(p);record.summary="Pago a proveedor reversado; la deuda vuelve a quedar pendiente.";
       break;
     }
     case "settlement": {
       const p=get(s,"settlements",b.id);live(p);bankProof(p.method);
+      paidAmount(p);
       if(p.method==="cash")cashBack(p.amount,"Devolución de honorarios");
       mark(p);record.summary="Pago al orfebre reversado; los honorarios vuelven a quedar pendientes.";
       break;
@@ -34,6 +40,9 @@ module.exports = function reverse(s, b, a, D) {
     case "payment": {
       const p=get(s,"payments",b.id),o=get(s,"orders",p.orderId);
       assert(!p.voidedAt&&!p.reversedAt,"El comprobante ya fue anulado o reversado.",409);
+      assert([p.cash,p.bank,p.change,p.goldMg,p.goldValue,p.rate,p.applied,p.received].every(Number.isSafeInteger),"El comprobante no conserva importes válidos.");
+      assert(p.change>=0&&p.goldMg>=0&&p.goldValue>=0&&p.rate>=0&&p.received===p.cash+p.bank+p.goldValue&&p.applied===p.received-p.change,"Los importes del comprobante original no concilian.");
+      assert(p.refund ? p.cash<=0&&p.bank<=0&&p.change===0&&p.goldMg===0&&p.applied<0 : p.cash>=0&&p.bank>=0&&p.applied>0,"El sentido del comprobante original no es válido.");
       assert(!["delivered","cancelled"].includes(o.status),"Reversa primero la entrega de la venta. Una orden anulada no admite movimientos.");
       const remaining=paid(s,o)-p.applied;
       assert(remaining>=0&&remaining<=total(o),"Hay devoluciones o cobros posteriores incompatibles. Revisa los comprobantes dependientes.");
@@ -57,7 +66,14 @@ module.exports = function reverse(s, b, a, D) {
       const rows=o.deliveryLedgerIds
         ? o.deliveryLedgerIds.map(key=>get(s,"ledger",key))
         : s.ledger.filter(x=>x.ref===o.code&&x.to==="cliente"&&["Devolución de pieza / sobrantes del cliente","Metal propio vendido en pieza"].includes(x.note));
-      assert(rows.every(x=>x.ref===o.code&&x.to==="cliente"&&["custody","scrap","finished"].includes(x.from)&&(x.owner===o.id||x.owner==="taller")),"Los movimientos no corresponden a esta entrega.");
+      assert(rows.length>0&&new Set(rows.map(x=>x.id)).size===rows.length,"La entrega no conserva movimientos completos y únicos. Revisa el registro original.");
+      assert(rows.every(x=>x.ref===o.code&&x.to==="cliente"&&x.metal===o.metal&&x.purity===o.purity&&["custody","scrap","finished"].includes(x.from)&&(x.owner===o.id||x.owner==="taller")),"Los movimientos no corresponden a esta entrega.");
+      assert(o.returned&&Array.isArray(o.returned.pieces)&&Array.isArray(o.returned.scraps),"La entrega no conserva los pesajes de producción.");
+      const customerIndex=o.allocations.findIndex(x=>x.owner===o.id),ownIndex=o.allocations.findIndex(x=>x.owner==="taller");
+      const customerPiece=customerIndex<0?0:o.returned.pieces[customerIndex],customerScrap=customerIndex<0?0:o.returned.scraps[customerIndex];
+      const ownPiece=ownIndex<0?0:o.returned.pieces[ownIndex],customerAssigned=customerIndex<0?0:o.allocations[customerIndex].mg;
+      const expectedRoutes=[{owner:o.id,from:"custody",mg:o.receivedMg-customerAssigned+customerPiece},{owner:o.id,from:"scrap",mg:customerScrap},{owner:"taller",from:"finished",mg:ownPiece}];
+      assert(expectedRoutes.every(route=>Number.isSafeInteger(route.mg)&&route.mg>=0&&rows.filter(x=>x.owner===route.owner&&x.from===route.from).reduce((v,x)=>v+x.mg,0)===route.mg)&&rows.every(x=>expectedRoutes.some(route=>route.owner===x.owner&&route.from===x.from)),"Los movimientos de entrega no concilian con los pesajes originales.");
       for(const x of rows)inverse(x);
       o.status="ready";o.invoice=null;o.deliveredAt=null;o.acceptance=null;o.deliveryLedgerIds=[];
       timeline(o,a,"Entrega / venta "+record.original.invoice+" reversada: "+reason);
@@ -66,16 +82,17 @@ module.exports = function reverse(s, b, a, D) {
     }
     case "order": {
       const o=get(s,"orders",b.id);
-      execute(s,"order.cancel",{id:o.id,reason},a);
-      record.summary="Orden "+o.code+" anulada sin producción ni saldo abonado; custodia devuelta.";
-      break;
+      execute(s,"order.cancel",{id:o.id,reason,reference},a);
+      return s.reversals.at(-1);
     }
     case "assignment": {
       const o=get(s,"orders",b.id);
       assert(o.status==="in_progress"&&!o.returned&&!o.materialUsage.some(x=>!x.reversedAt)&&o.history.at(-1)?.text.startsWith("Asignada a "),"Solo se reversa una asignación recién registrada, sin avances, insumos ni actividad posterior.");
       const rows=o.assignmentLedgerIds ? o.assignmentLedgerIds.map(key=>get(s,"ledger",key)) : s.ledger.filter(x=>x.ref===o.code&&x.to==="process"&&x.note.startsWith("Salida de "));
       assert(rows.length,"La asignación no conserva sus movimientos de origen.");
+      assert(new Set(rows.map(x=>x.id)).size===rows.length,"La asignación tiene movimientos duplicados.");
       assert(rows.every(x=>x.ref===o.code&&x.to==="process"&&["custody","own","payment","melt"].includes(x.from)&&(x.owner===o.id||x.owner==="taller")),"Los movimientos no corresponden a esta asignación.");
+      assert(new Set(o.allocations.map(x=>x.owner)).size===o.allocations.length&&o.allocations.every(allocation=>rows.filter(x=>x.owner===allocation.owner).reduce((v,x)=>v+x.mg,0)===allocation.mg)&&rows.every(x=>o.allocations.some(allocation=>allocation.owner===x.owner)&&x.metal===o.metal&&x.purity===o.purity&&(x.owner===o.id?x.from==="custody":["own","payment","melt"].includes(x.from))),"Los movimientos de asignación no concilian con los gramos originales.");
       record.original={smithId:o.smithId,smithFee:o.smithFee,allocations:structuredClone(o.allocations)};
       for(const x of rows)inverse(x);
       o.status="received";o.allocations=[];o.smithId=null;o.smithFee=0;o.assignmentLedgerIds=[];
@@ -95,6 +112,7 @@ module.exports = function reverse(s, b, a, D) {
     case "cash": {
       const x=get(s,"cashEntries",b.id);live(x);
       assert(x.ref==="CAJA","Los movimientos automáticos se revierten desde su operación original.");
+      money(Math.abs(x.amount),"Importe del movimiento original");assert(x.amount!==0,"El movimiento original no tiene importe.");
       cashBack(-x.amount,"Reversión de movimiento manual de caja");mark(x);
       record.summary="Movimiento manual compensado en el turno abierto. Los cierres anteriores se conservan.";
       break;
@@ -119,6 +137,8 @@ module.exports = function reverse(s, b, a, D) {
         assert(m.quantity>=x.quantity,"El insumo ya fue consumido. No hay existencias para devolver esta entrada.");
         const after=s.materialMoves.slice(s.materialMoves.indexOf(x)+1).filter(y=>y.materialId===m.id&&!y.reversedAt&&!y.reversalId&&y.quantity>0);
         assert(!after.length,"Reversa primero las entradas posteriores de este insumo para conservar su costo.");
+        const usedAfter=s.materialMoves.slice(s.materialMoves.indexOf(x)+1).some(y=>y.materialId===m.id&&!y.reversedAt&&!y.reversalId&&y.quantity<0);
+        assert(!usedAfter,"La entrada tiene consumos posteriores. Reversa primero esos consumos si todavía es seguro hacerlo.");
         assert(x.previousUnitCost!==undefined||x.note==="Existencia inicial","Esta entrada antigua no conserva el costo anterior. Corrige el inventario mediante un registro respaldado.");
         if(x.previousUnitCost!==undefined)m.unitCost=x.previousUnitCost;
       }
@@ -130,6 +150,7 @@ module.exports = function reverse(s, b, a, D) {
     case "stockTransfer": {
       const stock=s.stock.find(x=>x.transfers.some(t=>t.id===b.id));assert(stock,"Transferencia no encontrada.",404);live(stock);
       const t=stock.transfers.find(x=>x.id===b.id);live(t);
+      assert(Number.isSafeInteger(t.quantity)&&t.quantity>0&&Number.isSafeInteger(t.mg)&&t.mg>=t.quantity,"La transferencia no conserva unidades y peso válidos.");
       assert(Number.isSafeInteger(t.cost)&&t.cost>=0&&Number.isSafeInteger(stock.remainingCost??stock.cost),"Esta transferencia no conserva un costo válido para reversarla.");
       assert((stock.remainingCost??stock.cost)+t.cost<=stock.cost,"El costo devuelto supera el costo original del lote.");
       assert(stock.available+t.quantity<=stock.quantity&&(stock.remainingMg??stock.mg)+t.mg<=stock.mg,"La devolución supera las piezas o el peso original del lote.");
@@ -142,6 +163,7 @@ module.exports = function reverse(s, b, a, D) {
     case "stockReceive": {
       const stock=get(s,"stock",b.id),o=get(s,"orders",stock.orderId);live(stock);
       assert(o.stockId===stock.id&&o.status==="delivered","El ingreso ya no corresponde al estado de esta producción.");
+      assert(o.returned&&stock.mg===o.returned.pieceMg,"El peso del lote no coincide con la producción original.");
       assert(!stock.transfers.some(t=>!t.reversedAt)&&stock.available===stock.quantity&&(stock.remainingMg??stock.mg)===stock.mg,"Devuelve primero todas las transferencias de este lote.");
       assert(balance(s,"finished",stock.metal,stock.purity)>=stock.mg,"No está disponible todo el metal del lote.");
       stock.available=0;stock.remainingMg=0;stock.remainingCost=0;mark(stock);
