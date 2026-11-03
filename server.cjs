@@ -43,6 +43,7 @@ function createApp(options = {}) {
       (await db.prepare("SELECT json FROM state WHERE id=1").get()).json,
     );
     state.settings.goldCategories ??= D.defaultGoldCategories();
+    state.settings.metals ??= D.defaultMetals();
     return state;
   };
   const save = async (s) => {

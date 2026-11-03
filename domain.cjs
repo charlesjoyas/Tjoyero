@@ -98,9 +98,16 @@ function purity(v) {
   assert(Number.isInteger(x), "La ley se expresa en milésimas enteras.");
   return x;
 }
-function metal(v) {
-  assert(["oro", "plata", "platino"].includes(v), "Metal no válido.");
+function metal(v, s) {
+  const metals = s.settings.metals ?? defaultMetals();
+  assert(Array.isArray(metals) && metals.some((x) => x?.id === v), "Metal no válido.");
   return v;
+}
+function defaultMetals() {
+  return [{id:"oro",name:"Oro"},{id:"plata",name:"Plata"},{id:"platino",name:"Platino"}];
+}
+function metalKey(name) {
+  return name.normalize("NFKC").toLocaleLowerCase("es-CO").replace(/\s+/g, " ");
 }
 function date(v) {
   assert(
@@ -138,6 +145,7 @@ function initialState() {
     version: 1,
     revision: 0,
     settings: {
+      metals: defaultMetals(),
       goldCategories: defaultGoldCategories(),
       name: "Mi taller joyero",
       nit: "",
@@ -347,6 +355,24 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
+    case "metal.save": {
+      permit(a, "settings");
+      const metals = s.settings.metals || defaultMetals();
+      const name = str(b.name, "Nombre del metal", 60);
+      const key = metalKey(name);
+      assert(/^[\p{L}\p{N}][\p{L}\p{N} .()-]{0,59}$/u.test(key) && !["constructor", "prototype", "__proto__"].includes(key), "Usa un nombre de metal válido, sin caracteres especiales.");
+      const existing = b.id ? metals.find((x) => x.id === b.id) : null;
+      assert(!b.id || existing, "Metal no encontrado.", 404);
+      assert(!existing || existing.id === key, "El nombre de un metal registrado se conserva para mantener su historial.");
+      assert(existing || !metals.some((x) => x.id === key), "Ya existe un metal con ese nombre.");
+      assert(existing || metals.length < 100, "Puedes registrar hasta 100 metales.");
+      const rate = money(b.rate, "Tarifa por gramo fino");
+      const item = existing || {id:key,name};
+      if (!existing) metals.push(item);
+      s.settings.metals = metals;
+      s.settings.rate[item.id] = rate;
+      return item;
+    }
     case "category.delete": {
       permit(a, "settings");
       const categories = s.settings.goldCategories || defaultGoldCategories();
@@ -453,7 +479,7 @@ function execute(s, action, b, a) {
           3000,
         ),
         notes: str(b.notes, "Ficha técnica / medidas", 4000, false),
-        metal: metal(b.metal),
+        metal: metal(b.metal, s),
         purity: purity(b.purity),
         receivedMg: grams(b.receivedWeight ?? 0, "Peso recibido", true),
         dueDate: date(b.dueDate),
@@ -822,7 +848,7 @@ function execute(s, action, b, a) {
       const cashValue = money(b.cash ?? 0, "Efectivo"),
         bank = money(b.bank ?? 0, "Transferencia"),
         weight = grams(b.goldWeight ?? 0, "Metal como pago", true),
-        m = metal(b.metal || "oro"),
+        m = metal(b.metal || "oro", s),
         p = purity(b.purity || 750);
       const official = weight ? rate(s, m) : 0,
         r = weight ? money(b.rate ?? official, "Tarifa aplicada") : 0;
@@ -1205,7 +1231,7 @@ function execute(s, action, b, a) {
         "Solo se trasladan saldos propios de bodega, fundido y limalla.",
       );
       const mg = grams(b.weight),
-        m = metal(b.metal),
+        m = metal(b.metal, s),
         p = purity(b.purity);
       move(
         s,
@@ -1227,7 +1253,7 @@ function execute(s, action, b, a) {
         ["own", "melt", "scrap"].includes(b.account),
         "Los saldos ligados a clientes, mesas y caja se gestionan en su orden o turno.",
       );
-      const m = metal(b.metal),
+      const m = metal(b.metal, s),
         p = purity(b.purity),
         expected = balance(s, b.account, m, p),
         counted = grams(b.weight, "Peso contado", true),
@@ -1264,7 +1290,7 @@ function execute(s, action, b, a) {
     case "purchase.create": {
       permit(a, "purchases");
       get(s, "suppliers", b.supplierId);
-      const m = metal(b.metal),
+      const m = metal(b.metal, s),
         p = purity(b.purity),
         mg = grams(b.weight),
         unit = money(b.rate, "Precio por gramo fino");
@@ -1341,7 +1367,7 @@ function execute(s, action, b, a) {
     }
     case "melt.create": {
       permit(a, "inventory");
-      const m = metal(b.metal),
+      const m = metal(b.metal, s),
         source = b.source || "own";
       assert(["own", "scrap", "melt"].includes(source), "Origen no válido.");
       const p = purity(b.inputPurity),
@@ -1604,6 +1630,7 @@ function execute(s, action, b, a) {
         phone: str(b.phone, "Teléfono", 50, false),
         address: str(b.address, "Dirección", 250, false),
         rate: {
+          ...s.settings.rate,
           oro: money(b.goldRate, "Tarifa oro"),
           plata: money(b.silverRate, "Tarifa plata"),
           platino: money(b.platinumRate, "Tarifa platino"),
@@ -1719,7 +1746,7 @@ function validateState(s) {
         x.purity <= 1000,
       "Peso o ley inválidos en el libro.",
     );
-    metal(x.metal);
+    metal(x.metal, s);
     assert(
       x.fineUg === x.mg * x.purity,
       "El fino del libro no corresponde al peso y la ley.",
@@ -1854,11 +1881,18 @@ function validateState(s) {
         (x.remainingMg ?? x.mg) >= 0,
       "Existencia de piezas inválida.",
     );
-  for (const m of ["oro", "plata", "platino"])
-    money(s.settings.rate[m], "Tarifa");
+  const metals = s.settings.metals || defaultMetals(), metalIds = new Set();
+  assert(Array.isArray(metals) && metals.length >= 3 && metals.length <= 100, "Catálogo de metales inválido.");
+  for (const x of metals) {
+    assert(x && typeof x.name === "string" && typeof x.id === "string" && x.id === metalKey(x.name) && /^[\p{L}\p{N}][\p{L}\p{N} .()-]{0,59}$/u.test(x.id) && !["constructor", "prototype", "__proto__"].includes(x.id) && !metalIds.has(x.id), "Metal duplicado o inválido.");
+    metalIds.add(x.id);
+    money(s.settings.rate[x.id], "Tarifa de " + x.name);
+  }
+  assert(defaultMetals().every((x) => metalIds.has(x.id)), "Faltan los metales base del taller.");
   return s;
 }
 module.exports = {
+  defaultMetals,
   defaultGoldCategories,
   validateState,
   initialState,

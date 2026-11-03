@@ -1,0 +1,45 @@
+"use strict";
+const {test}=require("node:test");
+const assert=require("node:assert/strict");
+const D=require("../domain.cjs");
+const admin={role:"admin",name:"Administrador"};
+test("Metales: catálogo compatible, nombres únicos, permisos y tarifas conservadas",()=>{
+  const s=D.initialState();delete s.settings.metals;D.validateState(s);
+  assert.throws(()=>D.execute(s,"metal.save",{name:"Paladio",rate:200000},{role:"recepcion"}),/rol/);
+  const m=D.execute(s,"metal.save",{name:"Paladio",rate:200000},admin);
+  assert.equal(m.id,"paladio");assert.equal(s.settings.rate.paladio,200000);
+  for(const name of ["PALADIO"," paladio ","constructor","__proto__","<script>"])
+    assert.throws(()=>D.execute(s,"metal.save",{name,rate:200000},admin));
+  assert.throws(()=>D.execute(s,"metal.save",{name:"Cobre",rate:1.5},admin),/enteros/);
+  D.execute(s,"metal.save",{id:m.id,name:m.name,rate:220000},admin);
+  D.execute(s,"settings.save",{name:"Taller",goldRate:600000,silverRate:5000,platinumRate:200000,taxPercent:0,lossNormal:2,lossWarning:3.5,tolerance:0.005,printWidth:80,baudRate:9600,reason:"Tarifas generales"},admin);
+  assert.equal(s.settings.rate.paladio,220000,"Guardar configuración conserva las tarifas adicionales");
+  D.validateState(s);
+  const invalid=structuredClone(s);invalid.settings.metals.push({...m});
+  assert.throws(()=>D.validateState(invalid),/duplicado/);
+});
+test("Paladio: custodia, compra, inventario, cobro y respaldo usan el metal registrado",()=>{
+  const s=D.initialState();
+  D.execute(s,"metal.save",{name:"Paladio",rate:200000},admin);
+  const c=D.execute(s,"client.save",{name:"Cliente"},admin);
+  const orderData={clientId:c.id,type:"Reparación",description:"Anillo paladio",condition:"Recibido",metal:"paladio",purity:950,receivedWeight:3,dueDate:"2026-12-01",labor:190000,materialPrice:0,goldPrice:0,taxPercent:0};
+  const o=D.execute(s,"order.create",orderData,admin);
+  assert.equal(o.rateSnapshot,200000);
+  assert.equal(D.balance(s,"custody","paladio",950,o.id),3000);
+  assert.throws(()=>D.execute(s,"order.create",{...orderData,metal:"desconocido"},admin),/Metal/);
+  const supplier=D.execute(s,"supplier.save",{name:"Proveedor"},admin);
+  const purchase=D.execute(s,"purchase.create",{supplierId:supplier.id,document:"P-001",metal:"paladio",purity:950,weight:5,rate:200000,dueDate:"2026-12-01"},admin);
+  assert.equal(purchase.total,950000);
+  assert.equal(D.balance(s,"own","paladio",950),5000);
+  D.execute(s,"shift.open",{opening:100000},admin);
+  const p=D.execute(s,"payment.create",{orderId:o.id,metal:"paladio",purity:950,goldWeight:0.5,rate:200000},admin);
+  assert.equal(p.applied,95000);assert.equal(p.metal,"paladio");
+  assert.equal(D.cashMetals(s,s.shifts[0])[0].metal,"paladio");
+  const melt=D.execute(s,"melt.create",{metal:"paladio",source:"own",inputPurity:950,outputPurity:950,inputWeight:1,outputWeight:1,alloyWeight:0,notes:"Ensayo de paladio"},admin);
+  assert.equal(melt.metal,"paladio");
+  assert.equal(D.balance(s,"melt","paladio",950),1000);
+  D.validateState(s);
+  const restored=JSON.parse(JSON.stringify(s));D.validateState(restored);
+  assert.equal(restored.settings.rate.paladio,200000);
+  assert.equal(restored.ledger.filter(x=>x.metal==="paladio").length,5);
+});
