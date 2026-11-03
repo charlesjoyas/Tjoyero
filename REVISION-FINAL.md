@@ -29,6 +29,12 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
 
+## Varios metales propios en una pieza
+
+Asignar a mesa permite añadir y quitar aportes con metal, ley, peso y origen independientes. El inventario, las tarifas históricas, el retorno, la entrega y sus reversiones conservan cada composición, sin sumar gramos de plata como si fueran oro. La merma crítica se comprueba por metal, además de mostrar el total de la orden. La producción propia conserva su composición en existencias, traslados parciales y soportes Excel.
+
+Se comprueban saldos insuficientes sin guardados parciales, duplicados, múltiples leyes, aportes posteriores, propiedad del cliente, reintentos, persistencia y restauración con libSQL, y compatibilidad de las órdenes existentes. Las pruebas de navegador recorren asignación, retorno, entrega y traslados de piezas mixtas, incluyen pantallas de 320 px y verifican la composición descargada en Excel. La base real se validó en modo de solo lectura.
+
 ## Revisión de exportaciones a Excel
 
 - Se sustituyen las seis descargas CSV existentes por archivos `.xlsx`: libro de metales, cobros, gastos, ventas, auditoría y soporte individual de traslados.

@@ -745,6 +745,7 @@ function createApp(options = {}) {
         "/app.js": ["app.js", "text/javascript; charset=utf-8"],
         "/numbers.js": ["numbers.js", "text/javascript; charset=utf-8"],
         "/labor-estimate.js": ["labor-estimate.js", "text/javascript; charset=utf-8"],
+        "/production-metals.js": ["production-metals.js", "text/javascript; charset=utf-8"],
         "/transport.js": ["transport.js", "text/javascript; charset=utf-8"],
         "/excel-export.js": ["excel-export.js", "text/javascript; charset=utf-8"],
         "/exceljs.min.js": ["exceljs.min.js", "text/javascript; charset=utf-8"],

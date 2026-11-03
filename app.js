@@ -10,6 +10,7 @@ const E = (v) =>
       ],
   );
 const N = window.TallerNumbers;
+const PM = window.TallerProductionMetals;
 const number = (v, minimum = 2, maximum = minimum) =>
   N.format(v, minimum, maximum);
 const quantity = (v) => number(v, 2, 6);
@@ -804,7 +805,7 @@ function alerts() {
         id: o.id,
         icon: "alert",
       });
-    if (o.returned?.percent > S.settings.lossWarning)
+    if ((o.returned?.maxPercent ?? o.returned?.percent) > S.settings.lossWarning)
       result.push({
         title: `${o.code} · Merma fuera de rango`,
         text: number(o.returned.percent) + " % · " + smith(o),
@@ -1237,8 +1238,10 @@ function orderDetail(o) {
     row("Metal enviado a mesa", weight(sum())) +
     row("Del cliente", weight(sum(o.id))) +
     row("Del taller", weight(sum("taller")));
+  production += o.allocations.map(x=>{const item=PM.identity(o,x);return row(E(item.metal)+" · ley "+number(item.purity)+" · "+(x.owner==="taller"?"Taller":"Cliente"),weight(x.mg));}).join("");
   const ret = o.returned;
   if (ret) {
+    production += PM.groups(o).map(g=>row(E(g.metal)+" · ley "+number(g.purity)+" · pieza / limalla",weight(g.indexes.reduce((sum,i)=>sum+ret.pieces[i],0))+" / "+weight(g.indexes.reduce((sum,i)=>sum+ret.scraps[i],0)))).join("");
     production +=
       row("Pieza terminada", weight(ret.pieceMg)) +
       row("Limalla recuperada", weight(ret.scrapMg)) +
@@ -1249,14 +1252,14 @@ function orderDetail(o) {
     production +=
       '<div class="section-gap">' +
       badge(
-        ret.percent > S.settings.lossWarning
+        (ret.maxPercent ?? ret.percent) > S.settings.lossWarning
           ? "Fuera de rango"
-          : ret.percent > S.settings.lossNormal
+          : (ret.maxPercent ?? ret.percent) > S.settings.lossNormal
             ? "Por revisar"
             : "Normal",
-        ret.percent > S.settings.lossWarning
+        (ret.maxPercent ?? ret.percent) > S.settings.lossWarning
           ? "red"
-          : ret.percent > S.settings.lossNormal
+          : (ret.maxPercent ?? ret.percent) > S.settings.lossNormal
             ? "amber"
             : "",
       ) +
@@ -1280,7 +1283,7 @@ function orderDetail(o) {
   if (o.orderMetals?.length) account += orderMetalsTable(o.orderMetals);
   const ownIssued = o.allocations.filter(x=>x.owner==="taller").reduce((v,x)=>v+x.mg,0);
   account += ownIssued
-    ? notice("Salida de metal propio registrada", `Se registró el envío de ${weight(ownIssued)} de ${o.metal}, ley ${number(o.purity)}, a producción. Este movimiento de gramos se registra aparte del cobro al cliente.`, "blue")
+    ? notice("Salida de metal propio registrada", o.allocations.filter(x=>x.owner==="taller").map(x=>{const item=PM.identity(o,x);return `${weight(x.mg)} de ${item.metal}, ley ${number(item.purity)}`;}).join("; ")+". Estos gramos se descontaron del inventario y pasaron a producción.", "blue")
     : notice("Sin salida de metal propio registrada", "El presupuesto no retira gramos de tu inventario. Si usarás metal del taller, registra su peso en Asignar a mesa.", "blue");
   if (o.invoice) account += row("Comprobante de entrega", E(o.invoice));
   account +=
@@ -1966,7 +1969,7 @@ function stockPage() {
       "Cada transferencia descuenta las piezas y el metal de este taller. Descarga el soporte Excel para ingresarlo en el sistema receptor.",
       "blue",
     ) +
-    `<section class="card table-card"><div class="card-head"><h2>Existencias de piezas</h2></div>${table(["Código / pieza", "Origen", "Unidades", "Peso disponible", "Costo total lote", "Precio sugerido unit.", ""], S.stock.map((x) => tr([`<strong>${E(x.sku)}</strong><small>${E(x.description)}</small>`, E(find("orders", x.orderId)?.code), number(x.available) + " / " + number(x.quantity), weight(x.remainingMg ?? x.mg), cop(x.cost), cop(x.price), x.reversedAt ? reversalBadge(x) : (x.available ? allowed("inventory", "Transferir", "transfer-stock", "arrow", "small", x.id) : badge("Transferida", "gray")) + reversalButton("stockReceive",x.id)])).join(""), "Para ingresar piezas, crea una orden de producción propia y completa su control de calidad.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Transferencias registradas</h2></div>${table(
+    `<section class="card table-card"><div class="card-head"><h2>Existencias de piezas</h2></div>${table(["Código / pieza", "Origen", "Unidades", "Peso disponible", "Costo total lote", "Precio sugerido unit.", ""], S.stock.map((x) => tr([`<strong>${E(x.sku)}</strong><small>${E(x.description)}</small>`, E(find("orders", x.orderId)?.code), number(x.available) + " / " + number(x.quantity), weight(x.remainingMg ?? x.mg) + (x.components ? x.components.map(item=>`<small>${E(item.metal)} · ley ${number(item.purity)} · ${weight(item.remainingMg)}</small>`).join("") : ""), cop(x.cost), cop(x.price), x.reversedAt ? reversalBadge(x) : (x.available ? allowed("inventory", "Transferir", "transfer-stock", "arrow", "small", x.id) : badge("Transferida", "gray")) + reversalButton("stockReceive",x.id)])).join(""), "Para ingresar piezas, crea una orden de producción propia y completa su control de calidad.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Transferencias registradas</h2></div>${table(
       ["Referencia", "Fecha", "Pieza", "Unidades", "Peso", "Destino", ""],
       S.stock
         .flatMap((x) =>
@@ -1976,7 +1979,7 @@ function stockPage() {
               dt(t.at),
               E(x.sku),
               t.quantity,
-              weight(t.mg),
+              weight(t.mg) + (t.components ? t.components.map(item=>`<small>${E(item.metal)} · ley ${number(item.purity)} · ${weight(item.mg)}</small>`).join("") : ""),
               E(t.destination),
               button("Excel", "export-transfer", "download", "small", t.id) + (t.reversedAt ? reversalBadge(t) : reversalButton("stockTransfer",t.id)),
             ]),
@@ -2058,10 +2061,8 @@ function reportsPage() {
   );
 }
 function estimatedCost(o) {
-  const i = o.allocations.findIndex((x) => x.owner === "taller"),
-    used = i >= 0 ? o.allocations[i].mg - (o.returned?.scraps[i] || 0) : 0;
   return (
-    Math.round((used * o.purity * (o.rateSnapshot || 0)) / 1e6) +
+    PM.cost(o) +
     o.materialUsage.filter(x=>!x.reversedAt).reduce((v, x) => v + x.cost, 0) +
     o.smithFee
   );
@@ -2261,7 +2262,7 @@ function assistantPage() {
           .filter((o) => o.status === "in_progress")
           .map(
             (o) =>
-              `${E(o.code)} · ${E(smith(o))} · ${weight(o.allocations.reduce((v, x) => v + x.mg, 0))} de ${E(o.metal)} · ley ${number(o.purity)}`,
+              `${E(o.code)} · ${E(smith(o))} · ${PM.groups(o).map(g=>weight(g.mg)+" de "+E(g.metal)+" · ley "+number(g.purity)).join("; ")}`,
           )
           .join("<br>") || "No hay órdenes en mesa."
       }</div><div class="analysis-line"><strong>Mayor merma registrada</strong>${liquidated.length ? `${E(liquidated[0].code)} · ${E(smith(liquidated[0]))} · ${number(liquidated[0].returned.percent)} %` : "Registra retornos de piezas para analizar las mermas."}</div><div class="analysis-line"><strong>${number(a.length)} alertas de operación</strong>${a.map((x) => E(x.title)).join("<br>") || "La operación está al día."}</div>`,
@@ -2339,6 +2340,17 @@ function editOrder(id) {
   form.dataset.metalTotal = String(items.reduce((v,x)=>v+x.price,0));
   $(".form-grid", form).insertAdjacentHTML("beforeend", `<div class="span-2 form-section"><h3>Metal cobrado en esta orden</h3><p>Incluido en el presupuesto. No descuenta inventario: los gramos usados se registran al asignar a mesa.</p></div><div id="edit-order-metals" class="span-2 form-grid">${items.map(inlineOrderMetal).join("")}</div><div class="span-2">${button("Añadir metal a cobrar","add-inline-metal","plus","small")}</div>`);
 }
+let assignmentMetalIndex = 0;
+function assignmentMetalRow(index) {
+  return `<section class="card section-gap own-assignment-row" data-metal-index="${index}"><div class="card-head"><h3>Metal propio adicional</h3>${button("Quitar","remove-assignment-metal","","small",String(index))}</div><div class="form-grid">${select("ownMetal-"+index,"Metal",metals().map(x=>[x.id,x.name]),"oro")}${field("ownPurity-"+index,"Ley (milésimas)","number",750,'required min="1" max="1000" step="1"')}${weightField("ownWeight-"+index,"Peso a mesa (g)","")}${select("ownSource-"+index,"Origen",[["own","Bodega propia"],["payment","Recibido como pago"],["melt","Fundido / aleado"]],"own")}</div><p class="muted" data-assignment-available></p></section>`;
+}
+function updateAssignmentAvailability() {
+  const form=$("#modal-form");if(!form)return;
+  $$(".own-assignment-row",form).forEach(row=>{
+    const i=row.dataset.metalIndex,metal=form.elements["ownMetal-"+i].value,purity=numericValue(form.elements["ownPurity-"+i]),source=form.elements["ownSource-"+i].value;
+    $("[data-assignment-available]",row).textContent="Disponible en el origen: "+weight(balance(source,metal,purity));
+  });
+}
 function assignOrder(id) {
   const o = find("orders", id);
   if (!S.smiths.length)
@@ -2350,9 +2362,9 @@ function assignOrder(id) {
         button("Registrar orfebre", "new-smith", "plus", "primary"),
       ),
     );
-  simpleModal(
+  assignmentMetalIndex=0;
+  modal(
     "Asignar a mesa · " + o.code,
-    "order.assign",
     notice(
       `${o.metal} · Ley ${number(o.purity)}`,
       `Custodia disponible: ${weight(balance("custody", o.metal, o.purity, o.id))}. Propio en bodega: ${weight(balance("own", o.metal, o.purity))}.`,
@@ -2373,14 +2385,28 @@ function assignOrder(id) {
           ["melt", "Fundido / aleado"],
         ],
         "own",
-      )}</div></div>`,
-    { id },
+      )}</div><div class="span-2"><div id="assignment-metals"></div>${button("Añadir otro metal propio","add-assignment-metal","plus","small")}</div></div>`,
+    (b,form,key)=>mutate("order.assign",{id,smithId:b.smithId,smithFee:b.smithFee,customerWeight:b.customerWeight,ownWeight:b.ownWeight,source:b.source,
+      ownMetals: $$(".own-assignment-row",form).map(row=>{const i=row.dataset.metalIndex;return {metal:b["ownMetal-"+i],purity:b["ownPurity-"+i],weight:b["ownWeight-"+i],source:b["ownSource-"+i]};})},key),
     "Registrar salida y asignar",
   );
+  $("#modal-form").addEventListener("input",updateAssignmentAvailability);
+  $("#modal-form").addEventListener("change",updateAssignmentAvailability);
 }
 function returnOrder(id) {
   const o = find("orders", id),
     base = o.allocations.reduce((v, x) => v + x.mg, 0);
+  const groups=PM.groups(o);
+  if(groups.length>1){
+    modal("Pesar retorno · "+o.code,
+      notice("Retorno de una pieza con varios metales","Registra cuánto de cada metal queda en la pieza y su limalla. No se convierte un metal en otro.","blue")+
+      groups.map((g,i)=>`<section class="card section-gap"><div class="card-head"><h3>${E(g.metal)} · ley ${number(g.purity)}</h3></div><p>Entregado: ${weight(g.mg)}</p><div class="form-grid">${weightField("pieceWeight-"+i,"Metal en la pieza terminada (g)","",true)}${weightField("scrapWeight-"+i,"Limalla recuperada (g)",0,true)}</div><p class="muted" data-return-preview="${i}"></p></section>`).join("")+text("reason","Observaciones / justificación de merma"),
+      (b,form,key)=>mutate("order.return",{id,reason:b.reason,metalReturns:groups.map((g,i)=>({metal:g.metal,purity:g.purity,pieceWeight:b["pieceWeight-"+i],scrapWeight:b["scrapWeight-"+i]}))},key),"Liquidar metales y enviar a calidad");
+    const form=$("#modal-form");const update=()=>groups.forEach((g,i)=>{
+      const lost=g.mg-Math.round(numericValue(form.elements["pieceWeight-"+i])*1000)-Math.round(numericValue(form.elements["scrapWeight-"+i])*1000);
+      $("[data-return-preview='"+i+"']",form).textContent="Merma: "+weight(lost)+" · "+number(lost*100/g.mg)+" %"+(lost<0?" · Revisa los pesos.":lost*100/g.mg>S.settings.lossWarning?" · Requiere administrador.":"");
+    });form.addEventListener("input",update);update();return;
+  }
   simpleModal(
     "Pesar retorno · " + o.code,
     "order.return",
@@ -2709,16 +2735,19 @@ function receiveStock(id) {
 }
 function transferStock(id) {
   const x = find("stock", id);
-  simpleModal(
+  const components=PM.components(x);
+  modal(
     "Transferir piezas · " + x.sku,
-    "stock.transfer",
     notice(
       "Salida del taller hacia el minorista",
       "Esta acción registra la entrega física y descuenta existencias. El soporte Excel se descarga desde el historial.",
       "amber",
     ) +
-      `<div class="form-grid">${field("quantity", "Unidades a transferir", "number", x.available, `min="1" max="${x.available}" step="1" required`)}${weightField("weight", "Peso de las piezas transferidas (g)", (x.remainingMg ?? x.mg) / 1000)}<div class="span-2">${field("destination", "Joyería de destino y responsable que recibe", "text", "", 'required maxlength="250"')}</div></div>`,
-    { id },
+      `<div class="form-grid">${field("quantity", "Unidades a transferir", "number", x.available, `min="1" max="${x.available}" step="1" required`)}${x.components?components.map((item,i)=>weightField("componentWeight-"+i,item.metal+" · ley "+number(item.purity)+" a transferir (g)",item.remainingMg/1000,true)).join(""):weightField("weight", "Peso de las piezas transferidas (g)", (x.remainingMg ?? x.mg) / 1000)}<div class="span-2">${field("destination", "Joyería de destino y responsable que recibe", "text", "", 'required maxlength="250"')}</div></div>`,
+    (b,form,key)=>{
+      const parts=x.components?components.map((item,i)=>({metal:item.metal,purity:item.purity,weight:b["componentWeight-"+i]})):undefined;
+      return mutate("stock.transfer",{id,quantity:b.quantity,destination:b.destination,weight:parts?parts.reduce((sum,item)=>sum+Math.round(item.weight*1000),0)/1000:b.weight,...(parts?{components:parts}:{})},key);
+    },
     "Registrar transferencia",
   );
 }
@@ -2979,6 +3008,7 @@ function printOrder(id) {
     receiptHeader(
       o.invoice ? "COMPROBANTE COMERCIAL DE ENTREGA" : "RECIBO DE CUSTODIA",
     ) +
+      (o.returned && PM.groups(o).length>1 ? "<hr><strong>METALES EN LA PIEZA</strong>"+PM.pieces(o).map(item=>row(E(item.metal)+" · ley "+number(item.purity),weight(item.mg))).join("") : "") +
       `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${(o.orderMetals || []).map((x)=>`<p class="receipt-pre">${E(x.name)}: ${cop(x.price)}</p>`).join("")}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
   );
 }
@@ -3182,6 +3212,7 @@ async function exportData(type, id) {
             "Destino",
             "Entrega",
             "Estado",
+            "Composición por metal",
           ],
           [
             [
@@ -3190,14 +3221,15 @@ async function exportData(type, id) {
               s.sku,
               s.description,
               t.quantity,
-              s.metal,
-              s.purity,
+              t.components ? t.components.map(item=>item.metal).join(" + ") : s.metal,
+              t.components ? null : s.purity,
               t.mg / 1000,
               t.cost,
               s.price,
               t.destination,
               t.actor,
               t.reversedAt ? "Reversada" : "Vigente",
+              (t.components||[{metal:s.metal,purity:s.purity,mg:t.mg}]).map(item=>item.metal+" · ley "+number(item.purity)+" · "+weight(item.mg)).join("; "),
             ],
           ],
         );
@@ -3358,6 +3390,14 @@ async function handleAction(action, id, el) {
     case "edit-order":
       editOrder(id);
       break;
+    case "add-assignment-metal":
+      if ($$(".own-assignment-row").length>=50) throw new Error("Puedes añadir hasta 50 aportes.");
+      $("#assignment-metals").insertAdjacentHTML("beforeend",assignmentMetalRow(assignmentMetalIndex++));
+      updateAssignmentAvailability();
+      break;
+    case "remove-assignment-metal":
+      el.closest(".own-assignment-row").remove();
+      break;
     case "assign-order":
       assignOrder(id);
       break;
@@ -3377,7 +3417,7 @@ async function handleAction(action, id, el) {
       simpleModal(
         "Aportar metal · " + find("orders", id).code,
         "order.addMetal",
-        `<div class="form-grid">${weightField("weight", "Aporte adicional (g)")}${select(
+        `<div class="form-grid">${metalSelect(find("orders",id).metal)}${field("purity","Ley (milésimas)","number",find("orders",id).purity,'required min="1" max="1000" step="1"')}${weightField("weight", "Aporte adicional (g)")}${select(
           "source",
           "Origen",
           [

@@ -2,6 +2,7 @@
 const { randomUUID } = require("node:crypto");
 const Labor = require("./labor-estimate.js");
 const Numbers = require("./numbers.js");
+const PM = require("./production-metals.js");
 const id = () => randomUUID();
 const now = () => new Date().toISOString();
 const day = () =>
@@ -376,7 +377,7 @@ function execute(s, action, b, a) {
   switch (action) {
     case "operation.reverse": {
       permit(a,"adjust");
-      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity,money});
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity,money,PM});
     }
     case "category.delete": {
       permit(a, "settings");
@@ -568,12 +569,20 @@ function execute(s, action, b, a) {
           true,
         ),
         own = grams(b.ownWeight ?? 0, "Metal propio a mesa", true);
-      assert(
-        customer + own > 0,
-        "Debes registrar el metal que ingresa a la mesa.",
-      );
       const source = b.source || "own";
       assert(["own", "payment", "melt"].includes(source), "Origen no válido.");
+      const extra = b.ownMetals ?? [];
+      assert(Array.isArray(extra) && extra.length <= 50, "Añade hasta 50 aportes de metal propio.");
+      const contributions = [
+        ...(own ? [{ metal: o.metal, purity: o.purity, mg: own, source }] : []),
+        ...extra.map(x => {
+          assert(x && typeof x === "object", "Aporte de metal inválido.");
+          assert(["own", "payment", "melt"].includes(x.source || "own"), "Origen no válido.");
+          return { metal: metal(x.metal,s), purity: purity(x.purity), mg: grams(x.weight), source: x.source || "own" };
+        }),
+      ];
+      const assigned = customer + contributions.reduce((sum,x) => sum+x.mg,0);
+      assert(assigned > 0 && assigned <= 1000000000, "Debes registrar metal a mesa, hasta 1.000.000 g por orden.");
       const assignmentStart = s.ledger.length;
       move(
         s,
@@ -587,22 +596,14 @@ function execute(s, action, b, a) {
         o.code,
         "Salida de custodia a " + smith.name,
       );
-      move(
-        s,
-        a,
-        source,
-        "process",
-        own,
-        o.metal,
-        o.purity,
-        "taller",
-        o.code,
-        "Salida de bodega a " + smith.name,
-      );
-      o.allocations = [
-        { owner: o.id, mg: customer },
-        { owner: "taller", mg: own },
-      ].filter((x) => x.mg);
+      o.allocations = customer ? [{ owner: o.id, mg: customer }] : [];
+      for (const x of contributions) {
+        move(s,a,x.source,"process",x.mg,x.metal,x.purity,"taller",o.code,"Salida de bodega a " + smith.name);
+        const allocation = o.allocations.find(item => item.owner === "taller" && PM.key(PM.identity(o,item)) === PM.key(x));
+        if (allocation) allocation.mg += x.mg;
+        else o.allocations.push({ owner: "taller", mg: x.mg, metal: x.metal, purity: x.purity,
+          rateSnapshot: x.metal === o.metal ? o.rateSnapshot : s.settings.rate[x.metal] });
+      }
       o.assignmentLedgerIds = s.ledger.slice(assignmentStart).map(x=>x.id);
       o.smithId = smith.id;
       o.smithFee = money(b.smithFee ?? 0, "Honorarios de orfebre");
@@ -610,7 +611,7 @@ function execute(s, action, b, a) {
       timeline(
         o,
         a,
-        `Asignada a ${smith.name}: ${((customer + own) / 1000).toFixed(3)} g.`,
+        `Asignada a ${smith.name}: ${(assigned / 1000).toFixed(3)} g.`,
       );
       return o;
     }
@@ -628,36 +629,38 @@ function execute(s, action, b, a) {
         o.status === "in_progress" && !o.returned,
         "La orden ya fue liquidada o no está en mesa.",
       );
-      const piece = grams(b.pieceWeight, "Pieza terminada"),
-        scrap = grams(b.scrapWeight ?? 0, "Limalla", true),
-        assigned = o.allocations.reduce((v, x) => v + x.mg, 0),
-        loss = assigned - piece - scrap;
-      assert(
-        loss >= 0,
-        "Pieza y limalla superan el metal entregado. Registra primero cualquier aporte adicional.",
-      );
-      const pct = (loss * 100) / assigned,
-        reason = str(
-          b.reason,
-          "Observaciones de retorno",
-          2000,
-          pct > s.settings.lossNormal,
-        );
-      if (pct > s.settings.lossWarning) permit(a, "adjust");
-      const caps = o.allocations.map((x) => x.mg),
-        pieces = allocate(piece, caps),
-        remaining = caps.map((x, i) => x - pieces[i]),
-        scraps = allocate(scrap, remaining);
-      for (let i = 0; i < caps.length; i++) {
-        const owner = o.allocations[i].owner;
+      const groups = PM.groups(o), inputs = b.metalReturns;
+      assert(inputs === undefined || (Array.isArray(inputs) && inputs.length === groups.length), "Registra el retorno de cada metal y ley asignados.");
+      assert(groups.length === 1 || inputs !== undefined, "Pesa por separado el retorno de cada metal y ley.");
+      if (inputs) assert(new Set(inputs.map(x => PM.key(x))).size === inputs.length, "Retorno de metal duplicado.");
+      const pieces = o.allocations.map(() => 0), scraps = o.allocations.map(() => 0);
+      let piece = 0, scrap = 0, loss = 0, maxPercent = 0;
+      for (const group of groups) {
+        const input = inputs ? inputs.find(x => PM.key(x) === PM.key(group)) : b;
+        assert(input, "Falta el retorno de un metal asignado.");
+        const pieceMg = grams(input.pieceWeight, "Pieza terminada", true), scrapMg = grams(input.scrapWeight ?? 0, "Limalla", true);
+        const lossMg = group.mg - pieceMg - scrapMg;
+        assert(lossMg >= 0, "Pieza y limalla superan el metal entregado. Registra primero cualquier aporte adicional.");
+        maxPercent = Math.max(maxPercent, lossMg * 100 / group.mg);
+        const caps = group.indexes.map(index => o.allocations[index].mg), splitPieces = allocate(pieceMg, caps);
+        const splitScraps = allocate(scrapMg, caps.map((value,index) => value-splitPieces[index]));
+        group.indexes.forEach((index,i) => { pieces[index] = splitPieces[i]; scraps[index] = splitScraps[i]; });
+        piece += pieceMg; scrap += scrapMg; loss += lossMg;
+      }
+      assert(piece > 0, "La pieza terminada debe tener peso mayor que cero.");
+      const assigned = o.allocations.reduce((v,x) => v+x.mg,0), pct = loss * 100 / assigned;
+      const reason = str(b.reason,"Observaciones de retorno",2000,maxPercent > s.settings.lossNormal);
+      if (maxPercent > s.settings.lossWarning) permit(a,"adjust");
+      for (let i = 0; i < o.allocations.length; i++) {
+        const owner = o.allocations[i].owner, item = PM.identity(o,o.allocations[i]);
         move(
           s,
           a,
           "process",
           owner === "taller" ? "finished" : "custody",
           pieces[i],
-          o.metal,
-          o.purity,
+          item.metal,
+          item.purity,
           owner,
           o.code,
           "Pieza terminada",
@@ -668,8 +671,8 @@ function execute(s, action, b, a) {
           "process",
           "scrap",
           scraps[i],
-          o.metal,
-          o.purity,
+          item.metal,
+          item.purity,
           owner,
           o.code,
           "Limalla recuperada",
@@ -679,9 +682,9 @@ function execute(s, action, b, a) {
           a,
           "process",
           "merma",
-          remaining[i] - scraps[i],
-          o.metal,
-          o.purity,
+          o.allocations[i].mg - pieces[i] - scraps[i],
+          item.metal,
+          item.purity,
           owner,
           o.code,
           "Merma definitiva · " + (reason || "Dentro de tolerancia"),
@@ -692,6 +695,7 @@ function execute(s, action, b, a) {
         scrapMg: scrap,
         lossMg: loss,
         percent: pct,
+        maxPercent,
         at: now(),
         reason,
         absorption: "Taller en costo",
@@ -714,6 +718,7 @@ function execute(s, action, b, a) {
         "Solo se agrega metal a órdenes en mesa.",
       );
       const mg = grams(b.weight),
+        m = metal(b.metal ?? o.metal,s), p = purity(b.purity ?? o.purity),
         reason = str(b.reason, "Motivo del aporte", 1000),
         source = b.source || "own";
       assert(["own", "payment", "melt"].includes(source), "Origen no válido.");
@@ -723,15 +728,15 @@ function execute(s, action, b, a) {
         source,
         "process",
         mg,
-        o.metal,
-        o.purity,
+        m,
+        p,
         "taller",
         o.code,
         reason,
       );
-      const alloc = o.allocations.find((x) => x.owner === "taller");
+      const alloc = o.allocations.find((x) => x.owner === "taller" && PM.key(PM.identity(o,x)) === PM.key({metal:m,purity:p}));
       if (alloc) alloc.mg += mg;
-      else o.allocations.push({ owner: "taller", mg });
+      else o.allocations.push({ owner: "taller", mg, metal:m, purity:p, rateSnapshot:m===o.metal?o.rateSnapshot:s.settings.rate[m] });
       timeline(o, a, `Aporte adicional: ${mg / 1000} g. ${reason}`);
       return o;
     }
@@ -788,20 +793,22 @@ function execute(s, action, b, a) {
           o.code,
           "Devolución de pieza / sobrantes del cliente",
         );
-      const ownIndex = o.allocations.findIndex((x) => x.owner === "taller");
-      if (ownIndex >= 0)
+      for (let ownIndex = 0; ownIndex < o.allocations.length; ownIndex++) {
+        if (o.allocations[ownIndex].owner !== "taller") continue;
+        const item = PM.identity(o,o.allocations[ownIndex]);
         move(
           s,
           a,
           "finished",
           "cliente",
           o.returned.pieces[ownIndex],
-          o.metal,
-          o.purity,
+          item.metal,
+          item.purity,
           "taller",
           o.code,
           "Metal propio vendido en pieza",
         );
+      }
       o.deliveryLedgerIds = s.ledger.slice(deliveryStart).map(x=>x.id);
       o.status = "delivered";
       o.deliveredAt = now();
@@ -1563,6 +1570,9 @@ function execute(s, action, b, a) {
         at: now(),
         transfers: [],
       };
+      const components=PM.pieces(o);
+      if(components.length>1 || components[0]?.metal!==x.metal || components[0]?.purity!==x.purity)
+        x.components=components.map(item=>({...item,remainingMg:item.mg}));
       s.stock.push(x);
       o.status = "delivered";
       o.deliveredAt = now();
@@ -1577,6 +1587,19 @@ function execute(s, action, b, a) {
       const quantity = num(b.quantity, "Unidades", 1, x.available);
       assert(Number.isInteger(quantity), "Unidades enteras.");
       const mg = grams(b.weight, "Peso de las piezas a transferir");
+      let components;
+      if(x.components){
+        const inputs=b.components ?? (quantity===x.available?x.components.map(item=>({...item,weight:item.remainingMg/1000})):null);
+        assert(Array.isArray(inputs)&&inputs.length===x.components.length,"Registra el peso transferido de cada metal del lote.");
+        assert(new Set(inputs.map(item=>PM.key(item))).size===inputs.length,"Metal de transferencia duplicado.");
+        components=x.components.map(item=>{
+          const input=inputs.find(row=>PM.key(row)===PM.key(item));assert(input,"Falta un metal del lote.");
+          const weight=grams(input.weight,"Peso transferido por metal",true);
+          assert(weight<=item.remainingMg&&(quantity!==x.available||weight===item.remainingMg),"El peso transferido supera o no coincide con el saldo de un metal.");
+          return {metal:item.metal,purity:item.purity,mg:weight};
+        });
+        assert(components.reduce((sum,item)=>sum+item.mg,0)===mg,"Los pesos de los metales no coinciden con el peso de la transferencia.");
+      }
       assert(
         quantity !== x.available || mg === (x.remainingMg ?? x.mg),
         "El peso contado de las últimas piezas debe coincidir con el saldo disponible. Revisa el pesaje antes de transferir.",
@@ -1592,18 +1615,10 @@ function execute(s, action, b, a) {
           : Number((BigInt(x.remainingCost??x.cost)*BigInt(quantity)*2n+BigInt(x.available))/(2n*BigInt(x.available)));
       x.remainingCost = (x.remainingCost ?? x.cost) - transferCost;
       const ref = seq(s, "stockTransfer", "TR");
-      move(
-        s,
-        a,
-        "finished",
-        "minorista",
-        mg,
-        x.metal,
-        x.purity,
-        "taller",
-        ref,
-        str(b.destination, "Destino y responsable", 250),
-      );
+      const destination=str(b.destination,"Destino y responsable",250);
+      for(const item of components||[{metal:x.metal,purity:x.purity,mg}])
+        move(s,a,"finished","minorista",item.mg,item.metal,item.purity,"taller",ref,destination);
+      if(components)x.components.forEach((item,index)=>{item.remainingMg-=components[index].mg;});
       x.available -= quantity;
       x.remainingMg = (x.remainingMg ?? x.mg) - mg;
       assert(
@@ -1620,6 +1635,7 @@ function execute(s, action, b, a) {
         cost: transferCost,
         destination: b.destination,
       };
+      if(components)transfer.components=components;
       x.transfers.push(transfer);
       return { ...transfer, sku: x.sku, price: x.price };
     }
@@ -1887,13 +1903,20 @@ function validateState(s) {
           Number.isFinite(Date.parse(event.at)),
         "Historial de orden inválido.",
       );
-    for (const allocation of o.allocations)
+    const allocationKeys = new Set();
+    for (const allocation of o.allocations) {
       assert(
-        (allocation.owner === o.id || allocation.owner === "taller") &&
+        allocation && (allocation.owner === o.id || allocation.owner === "taller") &&
           Number.isSafeInteger(allocation.mg) &&
           allocation.mg > 0,
         "Aporte de metal inválido.",
       );
+      const item=PM.identity(o,allocation), key=allocation.owner+PM.key(item);
+      metal(item.metal,s);purity(item.purity);
+      assert(!allocationKeys.has(key),"Aporte de metal duplicado.");allocationKeys.add(key);
+      if(allocation.owner===o.id)assert(item.metal===o.metal&&item.purity===o.purity,"La custodia no corresponde al metal del cliente.");
+      if(allocation.rateSnapshot!==undefined)money(allocation.rateSnapshot,"Tarifa histórica del aporte");
+    }
     if (o.returned) {
       const r = o.returned,
         base = o.allocations.reduce((v, x) => v + x.mg, 0);
@@ -1910,6 +1933,11 @@ function validateState(s) {
           r.scraps.length === o.allocations.length,
         "Distribución de retorno inválida.",
       );
+      assert(r.pieces.every((x,i)=>Number.isSafeInteger(x)&&x>=0&&Number.isSafeInteger(r.scraps[i])&&r.scraps[i]>=0&&x+r.scraps[i]<=o.allocations[i].mg)&&r.pieces.reduce((sum,x)=>sum+x,0)===r.pieceMg&&r.scraps.reduce((sum,x)=>sum+x,0)===r.scrapMg,"Los pesajes por metal no concilian con el retorno.");
+      if(r.maxPercent!==undefined){
+        const expected=Math.max(...PM.groups(o).map(group=>(group.mg-group.indexes.reduce((sum,i)=>sum+r.pieces[i]+r.scraps[i],0))*100/group.mg));
+        assert(Number.isFinite(r.maxPercent)&&Math.abs(expected-r.maxPercent)<1e-9,"Merma por metal inválida.");
+      }
     }
   }
   for (const p of s.payments) {
@@ -1969,6 +1997,20 @@ function validateState(s) {
       transferIds.add(t.id);money(t.cost,"Costo de transferencia");
     }
     const active=x.transfers.filter(t=>!t.reversedAt);
+    if(x.components!==undefined){
+      assert(Array.isArray(x.components)&&x.components.length>0&&x.components.length<=100,"Composición del lote inválida.");
+      const keys=new Set();
+      for(const item of x.components){
+        assert(item&&typeof item==="object","Composición del lote inválida.");
+        metal(item.metal,s);purity(item.purity);
+        assert(!keys.has(PM.key(item))&&Number.isSafeInteger(item.mg)&&item.mg>0&&Number.isSafeInteger(item.remainingMg)&&item.remainingMg>=0&&item.remainingMg<=item.mg,"Saldo por metal del lote inválido.");keys.add(PM.key(item));
+      }
+      assert(x.components.reduce((sum,item)=>sum+item.mg,0)===x.mg&&x.components.reduce((sum,item)=>sum+item.remainingMg,0)===(x.remainingMg??x.mg),"El peso del lote no concilia por metal.");
+      for(const t of x.transfers){
+        assert(Array.isArray(t.components)&&t.components.length===keys.size&&new Set(t.components.map(item=>PM.key(item))).size===keys.size&&t.components.every(item=>keys.has(PM.key(item))&&Number.isSafeInteger(item.mg)&&item.mg>=0)&&t.components.reduce((sum,item)=>sum+item.mg,0)===t.mg,"Composición de transferencia inválida.");
+      }
+      for(const item of x.components)assert(x.reversedAt?item.remainingMg===0:item.remainingMg+active.reduce((sum,t)=>sum+t.components.find(row=>PM.key(row)===PM.key(item)).mg,0)===item.mg,"Las transferencias no concilian con cada metal del lote.");
+    }else assert(x.transfers.every(t=>t.components===undefined),"Transferencia con metales ajenos al lote.");
     if(x.reversedAt)assert(x.available===0&&(x.remainingMg??x.mg)===0&&(x.remainingCost??x.cost)===0&&active.length===0,"El lote reversado conserva existencias o transferencias.");
     else assert(x.available+active.reduce((v,t)=>v+t.quantity,0)===x.quantity&&(x.remainingMg??x.mg)+active.reduce((v,t)=>v+t.mg,0)===x.mg&&(x.remainingCost??x.cost)+active.reduce((v,t)=>v+t.cost,0)===x.cost,"Las unidades, el peso o el costo del lote no concilian con sus transferencias.");
   }

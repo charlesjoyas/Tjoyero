@@ -9,6 +9,7 @@ const allowed = [
   "app.js",
   "numbers.js",
   "labor-estimate.js",
+  "production-metals.js",
   "transport.js",
   "excel-export.js",
   "exceljs.min.js",

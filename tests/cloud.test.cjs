@@ -12,6 +12,25 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: asignación multimetal atómica, reintentos, retorno y restauración conservan cada inventario",async t=>{
+  const f=await fixture(t);
+  await f.request("/api/setup",{workshop:"Multimetal",name:"Admin",username:"admin",password:"1234",setupKey});
+  const client=(await f.act("client.save",{name:"Cliente"})).body.result,smith=(await f.act("smith.save",{name:"Orfebre",bench:"Mesa"})).body.result;
+  await f.act("inventory.adjust",{account:"own",metal:"plata",purity:925,weight:10,reason:"Saldo inicial"});
+  const order=(await f.act("order.create",{clientId:client.id,type:"Reparación",description:"Anillo oro y plata",condition:"Recibido",metal:"oro",purity:750,receivedWeight:2,dueDate:"2026-12-01",labor:0,taxPercent:0})).body.result;
+  const before=await f.state(),data={id:order.id,smithId:smith.id,customerWeight:2,ownMetals:[{metal:"plata",purity:925,weight:3}]};
+  assert.equal((await f.act("order.assign",{...data,ownMetals:[...data.ownMetals,{metal:"oro",purity:585,weight:1}]})).status,400);
+  assert.deepEqual(await f.state(),before,"Un aporte inválido no guarda los anteriores");
+  const key=randomUUID();assert.equal((await f.act("order.assign",data,key)).status,200);const assigned=await f.state();
+  assert.equal((await f.act("order.assign",data,key)).status,200);assert.deepEqual(await f.state(),assigned);
+  await f.open();assert.deepEqual(await f.state(),assigned);
+  const backup=(await f.request("/api/backup")).body;
+  assert.equal((await f.act("order.return",{id:order.id,metalReturns:[{metal:"oro",purity:750,pieceWeight:2},{metal:"plata",purity:925,pieceWeight:2.94,scrapWeight:0.04}]})).status,200);
+  assert.equal((await f.state()).orders[0].returned.pieceMg,4940);
+  assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);
+  const restored=await f.state();assert.deepEqual(restored.orders,assigned.orders);assert.deepEqual(restored.ledger,assigned.ledger);
+});
+
 test("Nube: auditoría para Excel paginada, fechas Bogotá y permisos sin modificar la operación", async t => {
   const f = await fixture(t);
   await f.request("/api/setup", { workshop: "Excel nube", name: "Admin", username: "admin", password: "1234", setupKey });

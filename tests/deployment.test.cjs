@@ -82,6 +82,7 @@ test(
       "exceljs.min.js",
       "numbers.js",
       "labor-estimate.js",
+      "production-metals.js",
     "transport.js",
     "transfers.cjs",
     "storage-schema.cjs",
