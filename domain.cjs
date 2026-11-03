@@ -1,6 +1,7 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
 const Labor = require("./labor-estimate.js");
+const Numbers = require("./numbers.js");
 const id = () => randomUUID();
 const now = () => new Date().toISOString();
 const day = () =>
@@ -326,6 +327,10 @@ function orderMetalItems(items) {
   money(normalized.reduce((v,x)=>v+x.price,0), "Total de metales de la orden");
   return normalized;
 }
+function taxAmount(base, percent) {
+  try { return Numbers.tax(base,percent); }
+  catch(e) { fail(e.message); }
+}
 function quote(s, b) {
   const labor = money(b.labor ?? 0, "Mano de obra"),
     materialPrice = money(b.materialPrice ?? 0, "Materiales"),
@@ -336,9 +341,7 @@ function quote(s, b) {
     0,
     100,
   );
-  const tax = Math.round(
-    ((labor + materialPrice + goldPrice) * taxPercent) / 100,
-  );
+  const tax = taxAmount(labor + materialPrice + goldPrice, taxPercent);
   money(labor + materialPrice + goldPrice + tax, "Total del presupuesto");
   let laborEstimate;
   const items = b.orderMetals === undefined ? undefined : orderMetalItems(b.orderMetals);
@@ -1508,7 +1511,8 @@ function execute(s, action, b, a) {
       );
       const qty = materialQuantity(b.quantity, "Cantidad", 0.001);
       assert(qty <= m.quantity, "Insumo insuficiente.");
-      const cost = money(Math.round(qty * m.unitCost), "Costo de insumos");
+      const microUnits=BigInt(Math.round(qty*1000000));
+      const cost = money(Number((microUnits*BigInt(m.unitCost)+500000n)/1000000n), "Costo de insumos");
       m.quantity = Number((m.quantity - qty).toFixed(6));
       const x = {
         id: id(),
@@ -1585,7 +1589,7 @@ function execute(s, action, b, a) {
       const transferCost =
         quantity === x.available
           ? (x.remainingCost ?? x.cost)
-          : Math.round(((x.remainingCost ?? x.cost) * quantity) / x.available);
+          : Number((BigInt(x.remainingCost??x.cost)*BigInt(quantity)*2n+BigInt(x.available))/(2n*BigInt(x.available)));
       x.remainingCost = (x.remainingCost ?? x.cost) - transferCost;
       const ref = seq(s, "stockTransfer", "TR");
       move(
@@ -1629,7 +1633,7 @@ function execute(s, action, b, a) {
           !s.settlements.some((x) => !x.reversedAt && x.orderIds.includes(o.id)),
       );
       assert(orders.length, "No hay honorarios pendientes de liquidación.");
-      const amount = orders.reduce((v, o) => v + o.smithFee, 0);
+      const amount = money(orders.reduce((v, o) => v + o.smithFee, 0),"Total de honorarios");
       assert(amount > 0, "Los honorarios asignados son cero.");
       const method = b.method;
       assert(["cash", "bank"].includes(method), "Medio inválido.");
@@ -1661,6 +1665,8 @@ function execute(s, action, b, a) {
       const reason = str(b.reason, "Motivo de actualización", 1000);
       const lossNormal = num(b.lossNormal, "Merma normal %", 0, 100),
         lossWarning = num(b.lossWarning, "Merma crítica %", lossNormal, 100);
+      const taxPercent = num(b.taxPercent,"Impuesto %",0,100);
+      taxAmount(0,taxPercent);
       Object.assign(s.settings, {
         name: str(b.name, "Nombre del taller", 160),
         nit: str(b.nit, "NIT", 60, false),
@@ -1672,7 +1678,7 @@ function execute(s, action, b, a) {
           plata: money(b.silverRate, "Tarifa plata"),
           platino: money(b.platinumRate, "Tarifa platino"),
         },
-        taxPercent: num(b.taxPercent, "Impuesto %", 0, 100),
+        taxPercent,
         lossNormal,
         lossWarning,
         toleranceMg: grams(b.tolerance, "Tolerancia", true),
@@ -1704,7 +1710,9 @@ function validateState(s) {
       Object.hasOwn(s, key) &&
         (Array.isArray(value)
           ? Array.isArray(s[key])
-          : typeof s[key] === typeof value),
+          : value && typeof value === "object"
+            ? s[key] !== null && typeof s[key] === "object" && !Array.isArray(s[key])
+            : typeof s[key] === typeof value),
       "Estructura de datos inválida: " + key,
     );
     if (Array.isArray(value)) {
@@ -1718,6 +1726,8 @@ function validateState(s) {
       }
     }
   }
+  assert(s.settings.rate&&typeof s.settings.rate==="object"&&!Array.isArray(s.settings.rate),"Tarifas de metales inválidas.");
+  assert(Object.values(s.counters).every(x=>Number.isSafeInteger(x)&&x>=0),"Contadores de comprobantes inválidos.");
   if (s.settings.goldCategories !== undefined) {
     const categories = s.settings.goldCategories;
     assert(Array.isArray(categories) && categories.length <= 200, "Catálogo de categorías inválido.");
@@ -1767,6 +1777,7 @@ function validateState(s) {
     Number.isSafeInteger(s.revision) && s.revision >= 0,
     "Revisión inválida.",
   );
+  if(s.lastRestoreRevision!==undefined)assert(Number.isSafeInteger(s.lastRestoreRevision)&&s.lastRestoreRevision>0&&s.lastRestoreRevision<=s.revision,"Marca de restauración inválida.");
   assert(
     s.shifts.filter((x) => !x.closedAt).length <= 1,
     "Hay varios turnos abiertos.",
@@ -1912,11 +1923,13 @@ function validateState(s) {
       "Importe de cobro inválido.",
     );
   }
-  for (const m of s.materials)
+  for (const m of s.materials) {
     assert(
       Number.isFinite(m.quantity) && m.quantity >= 0,
       "Existencia de insumo inválida.",
     );
+    money(m.unitCost,"Costo unitario de insumo");
+  }
   for (const x of s.materialMoves)
     assert(materials.has(x.materialId), "Movimiento de insumo inexistente.");
   for (const p of s.purchases) {
@@ -1938,7 +1951,8 @@ function validateState(s) {
     );
     if(x.expenseId!==undefined)assert(expensesByEntry.get(x.id)?.id===x.expenseId,"Salida de caja sin su gasto correspondiente.");
   }
-  for (const x of s.stock)
+  const transferIds=new Set();
+  for (const x of s.stock) {
     assert(
       orders.has(x.orderId) &&
         Number.isInteger(x.available) &&
@@ -1948,6 +1962,16 @@ function validateState(s) {
         (x.remainingMg ?? x.mg) >= 0,
       "Existencia de piezas inválida.",
     );
+    assert(Number.isSafeInteger(x.quantity)&&x.quantity>0&&Number.isSafeInteger(x.mg)&&x.mg>=x.quantity&&Array.isArray(x.transfers),"Lote de piezas inválido.");
+    money(x.cost,"Costo del lote");money(x.price,"Precio de pieza");money(x.remainingCost??x.cost,"Costo disponible del lote");
+    for(const t of x.transfers) {
+      assert(t&&typeof t.id==="string"&&!transferIds.has(t.id)&&Number.isSafeInteger(t.quantity)&&t.quantity>0&&Number.isSafeInteger(t.mg)&&t.mg>=t.quantity,"Transferencia de piezas inválida.");
+      transferIds.add(t.id);money(t.cost,"Costo de transferencia");
+    }
+    const active=x.transfers.filter(t=>!t.reversedAt);
+    if(x.reversedAt)assert(x.available===0&&(x.remainingMg??x.mg)===0&&(x.remainingCost??x.cost)===0&&active.length===0,"El lote reversado conserva existencias o transferencias.");
+    else assert(x.available+active.reduce((v,t)=>v+t.quantity,0)===x.quantity&&(x.remainingMg??x.mg)+active.reduce((v,t)=>v+t.mg,0)===x.mg&&(x.remainingCost??x.cost)+active.reduce((v,t)=>v+t.cost,0)===x.cost,"Las unidades, el peso o el costo del lote no concilian con sus transferencias.");
+  }
   const metals = s.settings.metals || defaultMetals(), metalIds = new Set();
   assert(Array.isArray(metals) && metals.length >= 3 && metals.length <= 100, "Catálogo de metales inválido.");
   for (const x of metals) {

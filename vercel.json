@@ -6,7 +6,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "includeFiles": "{server.cjs,domain.cjs,reversals.cjs,labor-estimate.js,storage-schema.cjs,cloud-storage.cjs,transfers.cjs}"
+      "includeFiles": "{server.cjs,domain.cjs,reversals.cjs,labor-estimate.js,numbers.js,storage-schema.cjs,cloud-storage.cjs,transfers.cjs}"
     }
   },
   "rewrites": [

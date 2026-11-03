@@ -59,5 +59,15 @@
       (p.fraction === undefined ? "" : "," + p.fraction)
     );
   }
-  return { format, parse, editing };
+  function tax(base, percent) {
+    if (!Number.isSafeInteger(base) || base < 0 || base > 1e12)
+      throw new Error("El subtotal debe estar entre cero y un billón de COP, en pesos enteros.");
+    if (typeof percent !== "number" || !Number.isFinite(percent) || percent < 0 || percent > 100)
+      throw new Error("El impuesto debe estar entre 0 y 100 %.");
+    const basisPoints = Math.round(percent * 100);
+    if (Math.abs(percent * 100 - basisPoints) > 0.000001)
+      throw new Error("El impuesto admite hasta 2 decimales.");
+    return Number((BigInt(base) * BigInt(basisPoints) + 5000n) / 10000n);
+  }
+  return { format, parse, editing, tax };
 });

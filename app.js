@@ -225,7 +225,7 @@ const moneyField = (name, label, val = 0) =>
     label,
     "number",
     val,
-    'min="0" step="1" required data-number-kind="money"',
+    'min="0" max="1000000000000" step="1" required data-number-kind="money"',
   );
 const weightField = (name, label, val = "", zero = false) =>
   '<div class="weight-control">' +
@@ -985,13 +985,21 @@ function receivePage() {
         )) +
     formWrap(
       "receive-form",
-      `<div class="grid two"><section class="card"><div class="card-head"><div><h2>1. Lo que trae el cliente</h2><p>Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2>2. Lo que le cobras al cliente</h2><p>Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
+      `<div class="grid two"><section class="card"><div class="card-head"><div><h2 id="reception-owner-title">1. Lo que trae el cliente</h2><p id="reception-owner-help">Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2 id="reception-budget-title">2. Lo que le cobras al cliente</h2><p id="reception-budget-help">Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
       "Registrar orden y abrir detalle",
     )
   );
 }
 function updateReceptionType(form) {
   const own = form.elements.type.value === "Producción propia";
+  $("#reception-owner-title",form).textContent=own?"1. Pieza que fabrica el taller":"1. Lo que trae el cliente";
+  $("#reception-owner-help",form).textContent=own?"El taller es el propietario. Los gramos de metal propio se registran al asignar a mesa.":"Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.";
+  $("#reception-budget-title",form).textContent=own?"2. Presupuesto interno de producción":"2. Lo que le cobras al cliente";
+  $("#reception-budget-help",form).textContent=own?"Valores de referencia para esta pieza. Se ingresa a inventario después de producción y calidad.":"Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.";
+  form.elements.clientId.closest(".field").hidden=own;
+  form.elements.receivedWeight.closest(".weight-control").hidden=own;
+  const capture=$("[data-action=capture-received]",form);
+  capture.disabled=own;capture.closest(".field").hidden=own;
   form.elements.clientId.required = !own;
   form.elements.clientId.disabled = own;
   if (own) {
@@ -1004,11 +1012,15 @@ function quotePreview(form) {
     base =
       Number(b.labor || 0) +
       Number(b.materialPrice || 0) +
-      Number(b.goldPrice || 0),
-    tax = Math.round((base * Number(b.taxPercent || 0)) / 100);
+      Number(b.goldPrice || 0);
   const el = $("#quote-preview");
-  if (el)
-    el.innerHTML = `Subtotal ${cop(base)} · Impuesto ${cop(tax)}<strong>Presupuesto total: ${cop(base + tax)}</strong>`;
+  if (el) {
+    try {
+      const tax=N.tax(base,Number(b.taxPercent||0));
+      if(base+tax>1e12)throw new Error("El presupuesto supera el máximo de un billón de COP.");
+      el.innerHTML = `Subtotal ${cop(base)} · Impuesto ${cop(tax)}<strong>Presupuesto total: ${cop(base + tax)}</strong>`;
+    } catch(e){el.textContent=e.message;}
+  }
   const summary = $("#labor-estimate-summary", form);
   if (summary) {
     const estimate = form.elements.laborEstimate.value;

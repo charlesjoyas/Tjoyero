@@ -14,13 +14,17 @@ const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 test("Nube: gastos bancarios persistentes y reversión sin descontar efectivo",async(t)=>{
   const f=await fixture(t);
   await f.request("/api/setup",{workshop:"Gastos nube",name:"Admin",username:"admin",password:"1234",setupKey});
-  const expense=(await f.act("expense.create",{category:"Arriendo",concept:"Arriendo del taller",amount:75000,method:"bank",reference:"BANCO-001"})).body.result;
+  const backup=(await f.request("/api/backup")).body,key=randomUUID(),data={category:"Arriendo",concept:"Arriendo del taller",amount:75000,method:"bank",reference:"BANCO-001"};
+  const expense=(await f.act("expense.create",data,key)).body.result;
   let state=await f.state();assert.equal(state.expenses.length,1);assert.equal(state.cashEntries.length,0);
   await f.open();assert.equal((await f.state()).expenses[0].id,expense.id);
   const payload={type:"expense",id:expense.id,reason:"Devolución verificada",reference:"DEV-001",confirmed:true};
   const preview=await f.request("/api/reversal-preview",payload);assert.equal(preview.status,200);assert.equal(preview.body.bankDelta,75000);assert.equal(preview.body.cashDelta,0);
   assert.equal((await f.act("operation.reverse",payload)).status,200);
   state=await f.state();assert.ok(state.expenses[0].reversedAt);assert.equal(state.cashEntries.length,0);
+  assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);
+  const restored=await f.state();assert.equal(restored.expenses,undefined);assert.equal(restored.reversals,undefined);
+  assert.equal((await f.act("expense.create",data,key)).status,409);assert.deepEqual(await f.state(),restored);
 });
 
 test("Nube: reversión previsualizada sin escritura y compensación persistente tras reiniciar",async(t)=>{

@@ -126,6 +126,9 @@ const { createApp } = require("../server.cjs");
       "assistant",
       "users",
       "settings",
+      "categories",
+      "expenses",
+      "reversals",
     ];
     fs.mkdirSync(path.join(__dirname, "../test-results/review"), {
       recursive: true,

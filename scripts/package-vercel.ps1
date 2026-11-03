@@ -11,7 +11,7 @@ $packageFiles = @(
     'index.html', 'app.js', 'numbers.js', 'labor-estimate.js', 'transport.js', 'styles.css', 'icon.svg',
     'server.cjs', 'domain.cjs', 'reversals.cjs', 'storage-schema.cjs', 'cloud-storage.cjs', 'transfers.cjs',
     'api/index.js', 'scripts/build-vercel.cjs', 'scripts/migrate-turso.cjs',
-    'scripts/export-cloud-backup.cjs', 'scripts/package-vercel.ps1', 'VERCEL.md', 'README.md'
+    'scripts/export-cloud-backup.cjs', 'scripts/package-vercel.ps1', 'VERCEL.md', 'README.md', 'REVISION-FINAL.md'
 )
 $packageFiles += Get-ChildItem -LiteralPath (Join-Path $packageWorkspace 'tests') -Recurse -File -Filter '*.cjs' | ForEach-Object {
     $_.FullName.Substring($packageWorkspace.Length + 1).Replace('\', '/')

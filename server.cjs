@@ -52,6 +52,12 @@ function createApp(options = {}) {
       .prepare("UPDATE state SET json=? WHERE id=1")
       .run(JSON.stringify(s));
   };
+  async function cachedResult(entry, userId, fingerprint) {
+    D.assert(entry.user_id===userId&&entry.fingerprint===fingerprint,"El identificador ya pertenece a otra operación.",409);
+    const response=JSON.parse(entry.response),current=await read();
+    D.assert(response.revision>=(current.lastRestoreRevision||0),"Se restauró una copia después de esta operación. Cierra el formulario y comprueba el registro antes de volver a registrarlo.",409);
+    return response;
+  }
   async function rollback() {
     try {
       await db.exec("ROLLBACK");
@@ -533,12 +539,7 @@ function createApp(options = {}) {
               .prepare("SELECT * FROM requests WHERE key=?")
               .get(key);
           if (existing) {
-            D.assert(
-              existing.user_id === a.id && existing.fingerprint === fp,
-              "El identificador ya pertenece a otra operación.",
-              409,
-            );
-            return await json(res, 200, JSON.parse(existing.response));
+            return await json(res, 200, await cachedResult(existing,a.id,fp));
           }
           await dailyBackup();
           await db.exec("BEGIN IMMEDIATE");
@@ -548,13 +549,9 @@ function createApp(options = {}) {
               .prepare("SELECT * FROM requests WHERE key=?")
               .get(key);
             if (confirmed) {
-              D.assert(
-                confirmed.user_id === a.id && confirmed.fingerprint === fp,
-                "El identificador ya pertenece a otra operación.",
-                409,
-              );
+              const response=await cachedResult(confirmed,a.id,fp);
               await db.exec("COMMIT");
-              return await json(res, 200, JSON.parse(confirmed.response));
+              return await json(res, 200, response);
             }
             a = await actor(req);
             D.assert(a, "Inicia sesión para continuar.", 401);
@@ -628,27 +625,7 @@ function createApp(options = {}) {
                     .digest("hex"),
                 "La copia está incompleta o fue modificada.",
               );
-              for (const [k, v] of Object.entries(D.initialState()))
-                D.assert(
-                  k in file.state &&
-                    (Array.isArray(v)
-                      ? Array.isArray(file.state[k])
-                      : typeof v === typeof file.state[k]),
-                  "Estructura de copia inválida: " + k,
-                );
-              for (const x of file.state.ledger)
-                D.assert(
-                  Number.isSafeInteger(x.mg) &&
-                    x.mg > 0 &&
-                    Number.isInteger(x.purity) &&
-                    x.purity > 0 &&
-                    x.purity <= 1000,
-                  "Libro de metal inválido.",
-                );
-              D.assert(
-                D.balances(file.state).every((x) => x.mg >= 0),
-                "La copia contiene existencias negativas.",
-              );
+              D.validateState(file.state);
               if (cloud)
                 await db.storeBackup(
                   "antes-de-restaurar-" + crypto.randomUUID(),
@@ -664,8 +641,11 @@ function createApp(options = {}) {
                   JSON.stringify(await backup()),
                 );
               const revision = s.revision;
-              Object.assign(s, file.state);
+              // Replace the whole snapshot, including optional fields added by newer releases.
+              for (const key of Object.keys(s)) delete s[key];
+              Object.defineProperties(s,Object.getOwnPropertyDescriptors(file.state));
               s.revision = revision;
+              s.lastRestoreRevision=revision+1;
               if (Array.isArray(file.audit)) {
                 const statements = [];
                 for (const event of file.audit) {
