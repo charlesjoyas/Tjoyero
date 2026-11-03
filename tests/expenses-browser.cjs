@@ -35,7 +35,8 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     await page.locator(`[data-action="print-expense"][data-id="expense|${cashExpense.id}"]`).click();
     assert.match(await page.locator('#dialog').innerText(),/Energía del taller/);assert.match(await page.locator('#dialog').innerText(),/25\.000,00/);await page.keyboard.press("Escape");
     const downloadPromise=page.waitForEvent("download");await page.locator('[data-action="export-expenses"]').click();const download=await downloadPromise;
-    const csvPath=path.join(dir,"gastos.csv");await download.saveAs(csvPath);assert.match(fs.readFileSync(csvPath,"utf8"),/Energía del taller/);
+    assert.match(download.suggestedFilename(),/\.xlsx$/);const excelPath=path.join(dir,"gastos.xlsx");await download.saveAs(excelPath);
+    const book=new (require("../exceljs.min.js").Workbook)();await book.xlsx.load(fs.readFileSync(excelPath));assert.equal(book.worksheets[0].getCell("E2").value,"Energía del taller");assert.equal(book.worksheets[0].getCell("H2").value,25000);
     await page.goto(base+"/#reports");assert.match(await page.locator('.kpis').innerText(),/Gastos del taller[\s\S]*95\.000,00/);
     await page.goto(base+"/#expenses");
     async function reverse(id,reference){
@@ -54,6 +55,6 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"produccion",password:"1234"}});
     const restrictedPage=await restricted.newPage();await restrictedPage.goto(base+"/#expenses");await restrictedPage.locator('#page').waitFor();assert.equal(await restrictedPage.locator('[data-nav="expenses"]').count(),0);assert.match(await restrictedPage.locator('#page').innerText(),/Acceso restringido/);
     assert.deepEqual(errors,[]);
-    console.log("Gastos UI: efectivo, banco, clasificación sin doble descuento, comprobantes, CSV, reportes, reversión, filtros, roles y móvil correctos.");
+    console.log("Gastos UI: efectivo, banco, clasificación sin doble descuento, comprobantes, Excel, reportes, reversión, filtros, roles y móvil correctos.");
   } finally {if(browser)await browser.close();await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

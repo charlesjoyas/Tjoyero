@@ -1,0 +1,31 @@
+"use strict";
+const { test } = require("node:test"), assert = require("node:assert/strict");
+const ExcelJS = require("../exceljs.min.js"), X = require("../excel-export.js");
+test("Excel real conserva números, fino de seis decimales, fechas Bogotá y texto seguro", async () => {
+  const texts = ["001234", "=1+1", "+SUM(A1:A2)", "-123", "@nombre", "  =1+1", "Áurea; oro\n\"joyas\" & <plata>"];
+  const data = await X.write("Libro de metales", ["ID", "Texto", "Valor COP", "Peso bruto g", "Fino g", "Fecha", "Fecha gasto"], texts.map((value, i) => [i + 1, value, 1234567, 12.345, 0.000001, X.date("2026-11-03T01:02:03Z"), X.date("2026-11-03")]));
+  assert.equal(Buffer.from(data).subarray(0, 2).toString(), "PK");
+  const book = new ExcelJS.Workbook(); await book.xlsx.load(data);
+  const sheet = book.worksheets[0];
+  assert.equal(sheet.rowCount, 8);
+  texts.forEach((text, i) => { assert.equal(sheet.getCell(i + 2, 2).value, text); assert.equal(sheet.getCell(i + 2, 2).type, ExcelJS.ValueType.String); });
+  assert.equal(sheet.getCell("C2").value, 1234567);
+  assert.equal(sheet.getCell("C2").type, ExcelJS.ValueType.Number);
+  assert.equal(sheet.getCell("C2").numFmt, "[$-es-CO]#,##0.00");
+  assert.equal(sheet.getCell("D2").value, 12.345);
+  assert.equal(sheet.getCell("D2").numFmt, "[$-es-CO]#,##0.000");
+  assert.equal(sheet.getCell("E2").value, 0.000001);
+  assert.equal(sheet.getCell("E2").numFmt, "[$-es-CO]#,##0.000000");
+  assert.equal(sheet.getCell("F2").value.toISOString(), "2026-11-02T20:02:03.000Z");
+  assert.equal(sheet.getCell("G2").value.toISOString(), "2026-11-03T00:00:00.000Z");
+  assert.equal(sheet.views[0].ySplit, 1); assert.ok(sheet.autoFilter);
+  assert.equal(sheet.getCell("A2").numFmt, "0");
+  assert.equal(book.creator, "Áurea Taller");
+});
+test("Excel vacío es válido y los datos corruptos producen un error explícito", async () => {
+  const book = new ExcelJS.Workbook(); await book.xlsx.load(await X.write("Sin datos", ["Comprobante", "Valor COP"], []));
+  assert.equal(book.worksheets[0].rowCount, 1);
+  for (const rows of [[[1]], [[1, NaN]], [[1, Infinity]], [[1, {}]], [[1, new Date("inválida")]], [[1, "a".repeat(32768)]]]) await assert.rejects(X.write("Datos", ["ID", "Valor COP"], rows));
+  assert.throws(() => X.date("2026-02-30"), /Fecha inválida/);
+  assert.throws(() => X.date("no es fecha"), /Fecha inválida/);
+});

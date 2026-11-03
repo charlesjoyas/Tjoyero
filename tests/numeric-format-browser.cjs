@@ -146,9 +146,12 @@ const assert = require("node:assert/strict");
     const downloading = page.waitForEvent("download");
     await click("export-payments");
     const file = await downloading;
-    const csv = fs.readFileSync(await file.path(), "utf8");
-    assert.match(csv, /2\.000\.000,00/);
-    assert.match(csv, /477\.314,00/);
+    assert.match(file.suggestedFilename(), /\.xlsx$/);
+    const book = new (require("../exceljs.min.js").Workbook)();
+    await book.xlsx.load(fs.readFileSync(await file.path()));
+    assert.equal(book.worksheets[0].getCell("D2").value, 2000000);
+    assert.equal(book.worksheets[0].getCell("J2").value, 477314);
+    assert.equal(book.worksheets[0].getCell("D2").numFmt, "[$-es-CO]#,##0.00");
     await page.locator("[data-nav=settings]").click();
     const percent = page.locator("[name=lossNormal]");
     await percent.fill("");
@@ -166,7 +169,7 @@ const assert = require("node:assert/strict");
     });
     assert.deepEqual(errors, []);
     console.log(
-      "Formato global verificado: miles, decimales, edición, coma y teclado decimal, precisión, moneda entera, gramos, porcentajes, comprobantes, CSV e identificadores intactos.",
+      "Formato global verificado: miles, decimales, edición, coma y teclado decimal, precisión, moneda entera, gramos, porcentajes, comprobantes, Excel e identificadores intactos.",
     );
   } finally {
     await browser?.close();

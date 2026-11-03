@@ -1,0 +1,118 @@
+"use strict";
+const { chromium } = require("playwright"), { createApp } = require("../server.cjs");
+const fs = require("node:fs"), os = require("node:os"), path = require("node:path"), assert = require("node:assert/strict");
+const D = require("../domain.cjs"), ExcelJS = require("../exceljs.min.js");
+(async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aurea-exports-")), app = createApp({ dataDir: dir });
+  await new Promise(resolve => app.server.listen(0, "127.0.0.1", resolve));
+  const base = "http://127.0.0.1:" + app.server.address().port;
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true, channel: "msedge" });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: "es-CO" });
+    assert.equal((await context.request.post(base + "/api/setup", { data: { workshop: "Taller Excel", name: "Admin", username: "admin", password: "1234" } })).status(), 201);
+    const page = await context.newPage(), errors = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(base + "/#payments");
+    await page.locator('[data-action="export-payments"]').waitFor();
+    assert.equal(await page.evaluate(() => !!window.ExcelJS), false, "La librería no retrasa la apertura de la aplicación");
+    await page.route("**/exceljs.min.js", route => route.abort(), { times: 1 });
+    await page.locator('[data-action="export-payments"]').click();
+    await page.locator("#toast").filter({ hasText: "No se pudo cargar" }).waitFor();
+    assert.equal(await page.locator('[data-action="export-payments"]').isEnabled(), true);
+    async function download(action) {
+      const waiting = page.waitForEvent("download");
+      await page.locator(`[data-action="${action}"]`).first().click();
+      const file = await waiting;
+      assert.match(file.suggestedFilename(), /\.xlsx$/);
+      const bytes = fs.readFileSync(await file.path()); assert.equal(bytes.subarray(0, 2).toString(), "PK");
+      const book = new ExcelJS.Workbook(); await book.xlsx.load(bytes);
+      return book.worksheets[0];
+    }
+    assert.equal((await download("export-payments")).rowCount, 1, "Cobros vacíos válidos");
+    const s = JSON.parse(app.db.prepare("SELECT json FROM state WHERE id=1").get().json);
+    const actor = { role: "admin", name: "Admin" }, run = (action, data) => D.execute(s, action, data, actor);
+    const c = run("client.save", { name: "Cliente Excel", document: "001234" });
+    const smith = run("smith.save", { name: "Orfebre Excel", bench: "Mesa 1" });
+    run("inventory.adjust", { account: "own", metal: "oro", purity: 750, weight: 20, reason: "Saldo inicial" });
+    run("inventory.adjust", { account: "own", metal: "plata", purity: 925, weight: 2.345, reason: "Solo plata Excel" });
+    run("shift.open", { opening: 500000 });
+    function order(type = "Fabricación") {
+      return run("order.create", { clientId: c.id, type, description: type === "Producción propia" ? "=SUM(A1:A2)" : "Orden Excel", condition: "Verificado", dueDate: D.day(), metal: "oro", purity: 750, receivedWeight: type === "Producción propia" ? 0 : 1, labor: type === "Producción propia" ? 0 : 100000, taxPercent: 19 });
+    }
+    function finish(o) {
+      run("order.assign", { id: o.id, smithId: smith.id, customerWeight: o.receivedMg / 1000, ownWeight: o.type === "Producción propia" ? 2 : 0, smithFee: 10000 });
+      run("order.return", { id: o.id, pieceWeight: o.type === "Producción propia" ? 2 : 1, scrapWeight: 0 });
+      run("order.quality", { id: o.id, checks: [true, true, true] });
+    }
+    const sold = order(); finish(sold);
+    run("payment.create", { orderId: sold.id, cash: 120000 });
+    run("order.deliver", { id: sold.id, acceptance: "Cliente Excel 001234" });
+    const canceledPaymentOrder = order();
+    const canceledPayment = run("payment.create", { orderId: canceledPaymentOrder.id, bank: 10000, bankRef: "000123" });
+    run("operation.reverse", { type: "payment", id: canceledPayment.id, reason: "Corrección probada", reference: "DEV-001", confirmed: true });
+    const reversedSale = order(); finish(reversedSale);
+    run("payment.create", { orderId: reversedSale.id, cash: 119000 });
+    run("order.deliver", { id: reversedSale.id, acceptance: "Cliente Excel" });
+    run("operation.reverse", { type: "sale", id: reversedSale.id, reason: "Pieza devuelta", confirmed: true });
+    const own = order("Producción propia"); finish(own);
+    const stock = run("stock.receive", { id: own.id, quantity: 2, cost: 100001, price: 200000 });
+    const transfer = run("stock.transfer", { id: stock.id, quantity: 1, weight: 1, destination: "001234 · Joyería Excel" });
+    const exp = run("expense.create", { category: "Arriendo", concept: "Arriendo Excel", method: "bank", amount: 20000, reference: "000999" });
+    run("expense.create", { category: "Transporte", concept: "Taxi Excel", method: "cash", amount: 5000 });
+    run("operation.reverse", { type: "expense", id: exp.id, reason: "Devuelto", reference: "DEV-002", confirmed: true });
+    D.validateState(s);
+    app.db.prepare("UPDATE state SET json=? WHERE id=1").run(JSON.stringify(s));
+    const insert = app.db.prepare("INSERT INTO audit(at,actor,action,details) VALUES(?,?,?,?)");
+    for (let i = 0; i < 2205; i++) insert.run(D.now(), "Auditor Excel", "prueba.export", JSON.stringify({ reference: "EX-" + i }));
+    const auditCount = app.db.prepare("SELECT COUNT(*) AS n FROM audit").get().n;
+    await page.reload(); await page.locator('[data-action="export-payments"]').waitFor();
+    let sheet = await download("export-payments");
+    assert.equal(sheet.rowCount, s.payments.length + 1);
+    assert.equal(sheet.getCell("D2").value, 120000); assert.equal(sheet.getCell("J2").value, 1000);
+    assert.equal(sheet.getCell("L3").value, "Sí"); assert.equal(sheet.getCell("N3").value, "000123");
+    await page.goto(base + "/#gold"); await page.locator('[data-filter="ledgerMetal"]').selectOption("plata");
+    sheet = await download("export-ledger");
+    assert.equal(sheet.rowCount, 2); assert.equal(sheet.getCell("E2").value, "plata"); assert.equal(sheet.getCell("G2").value, 2.345); assert.equal(sheet.getCell("H2").value, 2.169125);
+    await page.locator('[data-filter="ledgerMetal"]').selectOption("oro");
+    await page.locator('[data-filter="ledgerOwner"]').selectOption("taller");
+    sheet = await download("export-ledger");
+    assert.equal(sheet.rowCount - 1, s.ledger.filter(x => x.metal === "oro" && x.owner === "taller").length);
+    sheet.eachRow((row, index) => { if (index > 1) assert.equal(row.getCell(9).value, "Taller"); });
+    await page.locator('[data-filter="ledgerPurity"]').selectOption("750");
+    await page.locator('[data-filter="ledgerAccount"]').selectOption("own");
+    await page.locator('[data-filter="ledgerFrom"]').fill(D.day());
+    await page.locator('[data-filter="ledgerTo"]').fill(D.day());
+    sheet = await download("export-ledger");
+    assert.equal(sheet.rowCount - 1, s.ledger.filter(x => x.metal === "oro" && x.owner === "taller" && x.purity === 750 && (x.from === "own" || x.to === "own")).length);
+    await page.goto(base + "/#expenses"); await page.locator('[data-filter="expenseMethod"]').selectOption("bank");
+    sheet = await download("export-expenses");
+    assert.equal(sheet.rowCount, 2); assert.equal(sheet.getCell("E2").value, "Arriendo Excel"); assert.equal(sheet.getCell("H2").value, 20000); assert.equal(sheet.getCell("L2").value, "Reversado"); assert.equal(sheet.getCell("I2").value, "000999");
+    await page.locator('[data-filter="expenseMethod"]').selectOption("cash");
+    sheet = await download("export-expenses"); assert.equal(sheet.rowCount, 2); assert.equal(sheet.getCell("E2").value, "Taxi Excel");
+    await page.locator('[data-filter="expenseCategory"]').selectOption("Arriendo");
+    sheet = await download("export-expenses"); assert.equal(sheet.rowCount, 1, "No mezcla categorías o medios distintos");
+    await page.goto(base + "/#reports");
+    await page.locator('[data-filter="reportFrom"]').fill("2020-01-01");
+    await page.locator('[data-filter="reportTo"]').fill("2099-12-31");
+    sheet = await download("export-sales");
+    assert.equal(sheet.rowCount, 2, "Solo ventas a clientes, sin producción propia");
+    assert.equal(sheet.getCell("A2").value, sold.invoice); assert.equal(sheet.getCell("E2").value, 100000); assert.equal(sheet.getCell("F2").value, 19000); assert.equal(sheet.getCell("G2").value, 119000);
+    sheet = await download("export-audit"); assert.equal(sheet.rowCount - 1, auditCount, "Auditoría completa, incluso más de 2000 eventos");
+    assert.equal(new Set(sheet.getColumn(1).values.slice(2)).size, auditCount);
+    await page.locator('[data-filter="reportFrom"]').fill("2099-12-31");
+    await page.locator('[data-filter="reportTo"]').fill("2020-01-01");
+    await page.locator('[data-action="export-sales"]').click(); await page.locator("#toast").filter({ hasText: "fecha inicial" }).waitFor();
+    await page.goto(base + "/#stock"); sheet = await download("export-transfer");
+    assert.equal(sheet.rowCount, 2); assert.equal(sheet.getCell("A2").value, transfer.code); assert.equal(sheet.getCell("D2").value, "=SUM(A1:A2)"); assert.equal(sheet.getCell("I2").value, transfer.cost); assert.equal(sheet.getCell("K2").value, "001234 · Joyería Excel");
+    run("operation.reverse", { type: "stockTransfer", id: transfer.id, reason: "Devolución de vitrina", confirmed: true });
+    D.validateState(s); app.db.prepare("UPDATE state SET json=? WHERE id=1").run(JSON.stringify(s));
+    await page.reload(); sheet = await download("export-transfer"); assert.equal(sheet.getCell("M2").value, "Reversada"); assert.equal(sheet.getCell("I2").value, transfer.cost);
+    assert.deepEqual(errors, []);
+    console.log("Excel UI: seis exportaciones reales, contenido por sección, filtros, fechas, números, textos seguros, reversados, vacíos, reintento y auditoría de más de 2000 eventos correctos.");
+  } finally {
+    if (browser) await browser.close();
+    await new Promise(resolve => app.server.close(resolve));
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

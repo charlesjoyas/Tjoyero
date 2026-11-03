@@ -11,6 +11,28 @@ const { createCloudStorage } = require("../cloud-storage.cjs");
 const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
+
+test("Nube: auditoría para Excel paginada, fechas Bogotá y permisos sin modificar la operación", async t => {
+  const f = await fixture(t);
+  await f.request("/api/setup", { workshop: "Excel nube", name: "Admin", username: "admin", password: "1234", setupKey });
+  const statements = Array.from({ length: 1001 }, (_, i) => ({ sql: "INSERT INTO audit(at,actor,action,details) VALUES(?,?,?,?)", args: ["2026-02-01T12:00:00.000Z", "Admin", "export.test", JSON.stringify({ reference: i })] }));
+  for (const at of ["2026-02-01T04:59:59.999Z", "2026-02-01T05:00:00.000Z", "2026-02-02T04:59:59.999Z", "2026-02-02T05:00:00.000Z"]) statements.push({ sql: "INSERT INTO audit(at,actor,action,details) VALUES(?,?,?,?)", args: [at, "Admin", "export.boundary", "{}"] });
+  await f.app().db.batch(statements);
+  const prior = await f.state(), route = "/api/audit-export?from=2026-02-01&to=2026-02-01";
+  const first = await f.request(route); assert.equal(first.status, 200); assert.equal(first.body.rows.length, 1000);
+  const second = await f.request(route + "&before=" + first.body.next); assert.equal(second.status, 200); assert.equal(second.body.rows.length, 3); assert.equal(second.body.next, null);
+  const all = [...first.body.rows, ...second.body.rows]; assert.equal(new Set(all.map(x => x.id)).size, 1003);
+  assert.equal(all.filter(x => x.action === "export.boundary").length, 2);
+  assert.deepEqual(await f.state(), prior);
+  for (const invalid of ["?from=2026-02-30&to=2026-03-01", "?from=2026-03-01&to=2026-02-01", "?from=2026-02-01&to=2026-02-01&before=abc", "?from=2026-02-01&to=2026-02-01&before=-1", ""]) assert.equal((await f.request("/api/audit-export" + invalid)).status, 400);
+  const empty = await f.request("/api/audit-export?from=2000-01-01&to=2000-01-01"); assert.deepEqual(empty.body, { rows: [], next: null });
+  for (const role of ["contador", "produccion", "consulta", "recepcion"]) assert.equal((await f.act("user.create", { name: role, username: role, password: "1234", role })).status, 200);
+  for (const role of ["contador", "produccion", "consulta", "recepcion"]) {
+    assert.equal((await f.request("/api/login", { username: role, password: "1234" })).status, 200);
+    assert.equal((await f.request(route)).status, role === "contador" ? 200 : 403);
+  }
+  const anonymous = await fetch("http://127.0.0.1:" + f.app().server.address().port + route); assert.equal(anonymous.status, 401);
+});
 test("Nube: gastos bancarios persistentes y reversión sin descontar efectivo",async(t)=>{
   const f=await fixture(t);
   await f.request("/api/setup",{workshop:"Gastos nube",name:"Admin",username:"admin",password:"1234",setupKey});

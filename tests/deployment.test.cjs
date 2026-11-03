@@ -78,6 +78,8 @@ test(
       "domain.cjs",
       "reversals.cjs",
       "app.js",
+      "excel-export.js",
+      "exceljs.min.js",
       "numbers.js",
       "labor-estimate.js",
     "transport.js",
@@ -175,6 +177,8 @@ test(
     for (const resource of [
       "/",
       "/app.js",
+      "/excel-export.js",
+      "/exceljs.min.js",
       "/numbers.js",
       "/labor-estimate.js",
       "/styles.css",

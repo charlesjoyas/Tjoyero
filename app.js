@@ -1521,7 +1521,7 @@ function goldPage() {
       })
       .join(
         "",
-      )}</div><section class="card table-card section-gap"><div class="card-head"><div><h2>Movimientos de metal</h2><p>${number(ledger.length)} movimientos · historial sin borrado.</p></div>${button("Exportar CSV", "export-ledger", "download", "small")}</div><div class="filters"><select class="control" data-filter="ledgerAccount" aria-label="Cuenta">${option("", "Todas las cuentas", q)}${Object.entries(
+      )}</div><section class="card table-card section-gap"><div class="card-head"><div><h2>Movimientos de metal</h2><p>${number(ledger.length)} movimientos · historial sin borrado.</p></div>${button("Exportar Excel", "export-ledger", "download", "small")}</div><div class="filters"><select class="control" data-filter="ledgerAccount" aria-label="Cuenta">${option("", "Todas las cuentas", q)}${Object.entries(
       ACC,
     )
       .map(([k, v]) => option(k, v, q))
@@ -1694,7 +1694,7 @@ function paymentsPage() {
       "Abonos en dinero o metal, con tarifa y vueltas registradas.",
       allowed("payments", "Registrar pago", "new-payment", "plus", "primary"),
     ) +
-    `<div class="kpis">${kpi("Cartera de trabajos abiertos", cop(outstanding.reduce((v, o) => v + due(o), 0)), `${number(outstanding.length)} órdenes con saldo`, "cash", true)}${kpi("Cobrado hoy", cop(S.payments.filter((x) => !x.voidedAt && dayKey(x.at) === today()).reduce((v, x) => v + x.applied, 0)), "Abonos aplicados · COP", "chart")}${kpi("Comprobantes de cobro", S.payments.filter((x) => !x.voidedAt).length, "Con trazabilidad de caja", "file")}${kpi("Órdenes pagadas por entregar", S.orders.filter((o) => active(o) && due(o) === 0 && o.type !== "Producción propia").length, "Saldo en cero", "gem")}</div><section class="card table-card section-gap"><div class="card-head"><h2>Trabajos pendientes de cobro</h2></div>${orderTable(outstanding)}</section><section class="card table-card section-gap"><div class="card-head"><h2>Historial de cobros</h2>${button("Exportar CSV", "export-payments", "download", "small")}</div>${table(
+    `<div class="kpis">${kpi("Cartera de trabajos abiertos", cop(outstanding.reduce((v, o) => v + due(o), 0)), `${number(outstanding.length)} órdenes con saldo`, "cash", true)}${kpi("Cobrado hoy", cop(S.payments.filter((x) => !x.voidedAt && dayKey(x.at) === today()).reduce((v, x) => v + x.applied, 0)), "Abonos aplicados · COP", "chart")}${kpi("Comprobantes de cobro", S.payments.filter((x) => !x.voidedAt).length, "Con trazabilidad de caja", "file")}${kpi("Órdenes pagadas por entregar", S.orders.filter((o) => active(o) && due(o) === 0 && o.type !== "Producción propia").length, "Saldo en cero", "gem")}</div><section class="card table-card section-gap"><div class="card-head"><h2>Trabajos pendientes de cobro</h2></div>${orderTable(outstanding)}</section><section class="card table-card section-gap"><div class="card-head"><h2>Historial de cobros</h2>${button("Exportar Excel", "export-payments", "download", "small")}</div>${table(
       [
         "Comprobante / fecha",
         "Orden",
@@ -1736,7 +1736,7 @@ function filteredExpenses() {
 }
 function expensesPage() {
   const rows=filteredExpenses(),active=rows.filter(x=>!x.reversedAt&&!x.legacy),sum=items=>items.reduce((v,x)=>v+x.amount,0);
-  return head("EL DÍA A DÍA DEL TALLER","Gastos del taller","Registra lo pagado, conserva el soporte y revisa de dónde salió el dinero.",allowed("cash","Registrar gasto","new-expense","plus","primary")+button("Exportar CSV","export-expenses","download"))+
+  return head("EL DÍA A DÍA DEL TALLER","Gastos del taller","Registra lo pagado, conserva el soporte y revisa de dónde salió el dinero.",allowed("cash","Registrar gasto","new-expense","plus","primary")+button("Exportar Excel","export-expenses","download"))+
     notice("Una sola salida de dinero","Un gasto en efectivo descuenta la caja abierta. Un gasto bancario no toca el efectivo. Las salidas antiguas se pueden clasificar sin descontarlas otra vez.","blue")+
     `<div class="filters card section-gap">${field("expenseFrom","Desde","date",filters.expenseFrom||today().slice(0,7)+"-01",'data-filter="expenseFrom"')}${field("expenseTo","Hasta","date",filters.expenseTo||today(),'data-filter="expenseTo"')}<label class="field"><span>Medio de pago</span><select data-filter="expenseMethod">${[["","Todos"],["cash","Efectivo"],["bank","Banco"]].map(x=>option(x[0],x[1],filters.expenseMethod||"")).join("")}</select></label><label class="field"><span>Categoría</span><select data-filter="expenseCategory">${[["","Todas"],...expenseCategories.map(x=>[x,x]),["Sin clasificar","Sin clasificar"]].map(x=>option(x[0],x[1],filters.expenseCategory||"")).join("")}</select></label></div>`+
     `<div class="kpis">${kpi("Gastos clasificados",cop(sum(active)),"Del período · sin reversados","cash",true)}${kpi("Pagados desde caja",cop(sum(active.filter(x=>x.method==="cash"))),"Ya descontados del efectivo","cash")}${kpi("Pagados por banco",cop(sum(active.filter(x=>x.method==="bank"))),"No descuentan caja","file")}${kpi("Salidas sin clasificar",cop(sum(rows.filter(x=>x.legacy&&!x.reversedAt))),"Movimientos anteriores de caja","chart")}</div>`+
@@ -1765,7 +1765,8 @@ function printExpense(key) {
   showReceipt("Comprobante de gasto",receiptHeader("COMPROBANTE DE GASTO")+`<hr><strong>${E(x.code)}</strong>${x.reversedAt?" · REVERSADO":""}<br>Fecha del gasto: ${dateLabel(x.expenseDate)}<br>Registrado: ${dt(x.at)}<br>Responsable: ${E(x.actor)}<hr>Categoría: ${E(x.category)}<p class="receipt-pre">${E(x.concept)}</p>Pagado a: ${E(x.beneficiary||"No indicado")}<br>Medio: ${x.method==="cash"?"Efectivo de caja":"Banco / transferencia"}<br>Soporte: ${E(x.reference||"No indicado")}<hr>${row("VALOR PAGADO",cop(x.amount))}<small>${x.method==="cash"?"La salida está registrada en su turno de caja.":"Este gasto no descuenta efectivo de caja."}</small>`);
 }
 function exportExpenses() {
-  csv("gastos-taller",["Comprobante","Fecha gasto","Fecha registro","Categoría","Concepto","Pagado a","Medio","Valor COP","Soporte","Responsable","Turno de caja","Estado"],filteredExpenses().map(x=>[x.code,x.expenseDate,dt(x.at),x.category,x.concept,x.beneficiary,x.method==="cash"?"Efectivo":"Banco",x.amount,x.reference,x.actor,find("shifts",x.shiftId)?.code||"",x.reversedAt?"Reversado":x.legacy?"Sin clasificar":"Registrado"]));
+  if ((filters.expenseFrom || today().slice(0,7)+"-01") > (filters.expenseTo || today())) throw new Error("La fecha inicial no puede superar la fecha final.");
+  return excel("gastos-taller",["Comprobante","Fecha gasto","Fecha registro","Categoría","Concepto","Pagado a","Medio","Valor COP","Soporte","Responsable","Turno de caja","Estado"],filteredExpenses().map(x=>[x.code,window.TallerExcel.date(x.expenseDate),window.TallerExcel.date(x.at),x.category,x.concept,x.beneficiary,x.method==="cash"?"Efectivo":"Banco",x.amount,x.reference,x.actor,find("shifts",x.shiftId)?.code||"",x.reversedAt?"Reversado":x.legacy?"Sin clasificar":"Registrado"]));
 }
 function cashPage() {
   const shift = currentShift(),
@@ -1960,7 +1961,7 @@ function stockPage() {
     ) +
     notice(
       "Entrega a la joyería minorista",
-      "Cada transferencia descuenta las piezas y el metal de este taller. Descarga el soporte CSV para ingresarlo en el sistema receptor.",
+      "Cada transferencia descuenta las piezas y el metal de este taller. Descarga el soporte Excel para ingresarlo en el sistema receptor.",
       "blue",
     ) +
     `<section class="card table-card"><div class="card-head"><h2>Existencias de piezas</h2></div>${table(["Código / pieza", "Origen", "Unidades", "Peso disponible", "Costo total lote", "Precio sugerido unit.", ""], S.stock.map((x) => tr([`<strong>${E(x.sku)}</strong><small>${E(x.description)}</small>`, E(find("orders", x.orderId)?.code), number(x.available) + " / " + number(x.quantity), weight(x.remainingMg ?? x.mg), cop(x.cost), cop(x.price), x.reversedAt ? reversalBadge(x) : (x.available ? allowed("inventory", "Transferir", "transfer-stock", "arrow", "small", x.id) : badge("Transferida", "gray")) + reversalButton("stockReceive",x.id)])).join(""), "Para ingresar piezas, crea una orden de producción propia y completa su control de calidad.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Transferencias registradas</h2></div>${table(
@@ -1975,7 +1976,7 @@ function stockPage() {
               t.quantity,
               weight(t.mg),
               E(t.destination),
-              button("CSV", "export-transfer", "download", "small", t.id) + (t.reversedAt ? reversalBadge(t) : reversalButton("stockTransfer",t.id)),
+              button("Excel", "export-transfer", "download", "small", t.id) + (t.reversedAt ? reversalBadge(t) : reversalButton("stockTransfer",t.id)),
             ]),
           ),
         )
@@ -2001,8 +2002,8 @@ function reportsPage() {
       "DECISIONES CON FUNDAMENTO",
       "Reportes y auditoría",
       "Resultados de las órdenes entregadas y trazabilidad de los registros.",
-      button("Ventas CSV", "export-sales", "download") +
-        button("Auditoría CSV", "export-audit", "download"),
+      button("Ventas Excel", "export-sales", "download") +
+        button("Auditoría Excel", "export-audit", "download"),
     ) +
     `<div class="filters report-filters card">${field("reportFrom", "Desde", "date", from, 'data-filter="reportFrom"')}${field("reportTo", "Hasta", "date", to, 'data-filter="reportTo"')}</div><div class="kpis">${kpi("Ventas entregadas", cop(gross), sales.length + " comprobantes comerciales", "chart", true)}${kpi("Impuestos registrados", cop(tax), "Según presupuesto de cada orden", "file")}${kpi("Costo operativo estimado", cop(cost), "Tarifa histórica + insumos + orfebre", "gold")}${kpi("Margen estimado", cop(gross - tax - cost), "Antes de gastos generales", "chart")}${kpi("Gastos del taller", cop(expenseTotal), "Clasificados · sin reversados", "cash")}${kpi("Resultado después de gastos", cop(gross - tax - cost - expenseTotal), "Estimado del período", "chart")}</div><div class="section-gap">${notice("Cómo se estima el costo", "Metal propio consumido (incluida su merma) a la tarifa guardada al recibir la orden, más insumos y honorarios. No equivale a contabilidad fiscal ni incluye todos los gastos del negocio.", "blue")}</div>${unclassified ? `<div class="section-gap">${notice("Salidas de caja pendientes de clasificar", "Hay " + cop(unclassified) + " en salidas anteriores sin clasificar. Revisa Gastos del taller; todavía no se restan del resultado después de gastos.", "amber")}</div>` : ""}<section class="card table-card"><div class="card-head"><h2>Rendimiento de orfebres en el período</h2></div>${table(
       [
@@ -2033,7 +2034,7 @@ function reportsPage() {
           ]);
         })
         .join(""),
-    )}</section><section class="card table-card section-gap"><div class="card-head"><h2>Ventas del período</h2></div>${table(["Comprobante", "Fecha", "Orden", "Cliente", "Base", "Impuesto", "Total", "Costo estimado"], sales.map((o) => tr([E(o.invoice), dt(o.deliveredAt), E(o.code), E(client(o)), cop(total(o) - o.tax), cop(o.tax), cop(total(o)), cop(estimatedCost(o))])).join(""))}</section><section class="card table-card section-gap"><div class="card-head"><div><h2>Registro de auditoría</h2><p>Últimos 2.000 eventos. La copia de seguridad conserva el historial completo.</p></div></div>${table(
+    )}</section><section class="card table-card section-gap"><div class="card-head"><h2>Ventas del período</h2></div>${table(["Comprobante", "Fecha", "Orden", "Cliente", "Base", "Impuesto", "Total", "Costo estimado"], sales.map((o) => tr([E(o.invoice), dt(o.deliveredAt), E(o.code), E(client(o)), cop(total(o) - o.tax), cop(o.tax), cop(total(o)), cop(estimatedCost(o))])).join(""))}</section><section class="card table-card section-gap"><div class="card-head"><div><h2>Registro de auditoría</h2><p>Vista de los últimos 2.000 eventos. Excel exporta todo el período seleccionado.</p></div></div>${table(
       ["Fecha", "Responsable", "Acción", "Referencia", ""],
       AUDIT.filter((x) => inRange(x.at))
         .slice(0, 300)
@@ -2711,7 +2712,7 @@ function transferStock(id) {
     "stock.transfer",
     notice(
       "Salida del taller hacia el minorista",
-      "Esta acción registra la entrega física y descuenta existencias. El soporte CSV se descarga desde el historial.",
+      "Esta acción registra la entrega física y descuenta existencias. El soporte Excel se descarga desde el historial.",
       "amber",
     ) +
       `<div class="form-grid">${field("quantity", "Unidades a transferir", "number", x.available, `min="1" max="${x.available}" step="1" required`)}${weightField("weight", "Peso de las piezas transferidas (g)", (x.remainingMg ?? x.mg) / 1000)}<div class="span-2">${field("destination", "Joyería de destino y responsable que recibe", "text", "", 'required maxlength="250"')}</div></div>`,
@@ -3009,32 +3010,22 @@ function download(name, content, type = "text/plain;charset=utf-8") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-function csv(name, headers, rows) {
-  const cell = (v, index) => {
-    const heading = headers[index] || "";
-    let s =
-      typeof v === "number" && !/^ID$/i.test(heading)
-        ? /\bg\b/i.test(heading)
-          ? number(v, 3, 6)
-          : quantity(v)
-        : String(v ?? "");
-    if (typeof v !== "number" && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
-    return '"' + s.replace(/"/g, '""') + '"';
-  };
+async function excel(name, headers, rows) {
+  const content = await window.TallerExcel.write(name, headers, rows, { workshop: S.settings.name });
   download(
-    name + "-" + today() + ".csv",
-    "\uFEFF" +
-      [headers, ...rows].map((r) => r.map(cell).join(";")).join("\r\n"),
-    "text/csv;charset=utf-8",
+    name + "-" + today() + ".xlsx",
+    content,
+    window.TallerExcel.MIME,
   );
 }
-function exportData(type, id) {
+async function exportData(type, id) {
   const from = filters.reportFrom || today().slice(0, 7) + "-01",
     to = filters.reportTo || today(),
     inRange = (at) => at && dayKey(at) >= from && dayKey(at) <= to;
   if (type === "ledger") {
     const f = filters;
-    csv(
+    if (f.ledgerFrom && f.ledgerTo && f.ledgerFrom > f.ledgerTo) throw new Error("La fecha inicial no puede superar la fecha final.");
+    return excel(
       "libro-metales",
       [
         "Fecha",
@@ -3048,6 +3039,7 @@ function exportData(type, id) {
         "Propietario",
         "Responsable",
         "Motivo",
+        "Estado",
       ],
       S.ledger
         .filter(
@@ -3065,7 +3057,7 @@ function exportData(type, id) {
             (!f.ledgerTo || dayKey(x.at) <= f.ledgerTo),
         )
         .map((x) => [
-          dt(x.at),
+          window.TallerExcel.date(x.at),
           x.ref,
           ACC[x.from] || x.from,
           ACC[x.to] || x.to,
@@ -3076,11 +3068,12 @@ function exportData(type, id) {
           x.owner === "taller" ? "Taller" : find("orders", x.owner)?.code,
           x.actor,
           x.note,
+          x.reversedAt ? "Reversado" : x.ref?.startsWith("REV-") ? "Compensación" : "Registrado",
         ]),
     );
   }
   if (type === "payments")
-    csv(
+    return excel(
       "cobros",
       [
         "Comprobante",
@@ -3095,10 +3088,14 @@ function exportData(type, id) {
         "Vueltas COP",
         "Abono COP",
         "Anulado",
+        "Cliente",
+        "Soporte bancario",
+        "Responsable",
+        "Turno de caja",
       ],
       S.payments.map((x) => [
         x.code,
-        dt(x.at),
+        window.TallerExcel.date(x.at),
         find("orders", x.orderId)?.code,
         x.cash,
         x.bank,
@@ -3109,10 +3106,15 @@ function exportData(type, id) {
         x.change,
         x.applied,
         x.voidedAt ? "Sí" : "No",
+        find("orders", x.orderId) ? client(find("orders", x.orderId)) : "",
+        x.bankRef,
+        x.actor,
+        find("shifts", x.shiftId)?.code,
       ]),
     );
+  if (["sales", "audit"].includes(type) && from > to) throw new Error("La fecha inicial no puede superar la fecha final.");
   if (type === "sales")
-    csv(
+    return excel(
       "ventas",
       [
         "Comprobante",
@@ -3128,7 +3130,7 @@ function exportData(type, id) {
         .filter((o) => o.invoice && inRange(o.deliveredAt))
         .map((o) => [
           o.invoice,
-          dt(o.deliveredAt),
+          window.TallerExcel.date(o.deliveredAt),
           o.code,
           client(o),
           total(o) - o.tax,
@@ -3137,23 +3139,32 @@ function exportData(type, id) {
           estimatedCost(o),
         ]),
     );
-  if (type === "audit")
-    csv(
+  if (type === "audit") {
+    const rows = [];
+    let before = null;
+    do {
+      const page = await api("/api/audit-export?" + new URLSearchParams({ from, to, ...(before ? { before } : {}) }));
+      rows.push(...page.rows);
+      if (page.next && before && page.next >= before) throw new Error("No se pudo continuar la exportación de auditoría.");
+      before = page.next;
+    } while (before);
+    return excel(
       "auditoria",
       ["ID", "Fecha", "Responsable", "Acción", "Detalle"],
-      AUDIT.filter((x) => inRange(x.at)).map((x) => [
+      rows.map((x) => [
         x.id,
-        dt(x.at),
+        window.TallerExcel.date(x.at),
         x.actor,
         x.action,
         x.details,
       ]),
     );
+  }
   if (type === "transfer") {
     for (const s of S.stock) {
       const t = s.transfers.find((x) => x.id === id);
       if (t)
-        csv(
+        return excel(
           "traslado-" + t.code,
           [
             "Referencia",
@@ -3173,14 +3184,14 @@ function exportData(type, id) {
           [
             [
               t.code,
-              dt(t.at),
+              window.TallerExcel.date(t.at),
               s.sku,
               s.description,
               t.quantity,
               s.metal,
               s.purity,
               t.mg / 1000,
-              t.cost ?? Math.round((s.cost * t.quantity) / s.quantity),
+              t.cost,
               s.price,
               t.destination,
               t.actor,
@@ -3189,7 +3200,9 @@ function exportData(type, id) {
           ],
         );
     }
+    throw new Error("Traslado no encontrado. Actualiza el inventario y vuelve a intentar.");
   }
+  throw new Error("Exportación no disponible.");
 }
 function whatsapp(id) {
   const o = find("orders", id),
@@ -3201,8 +3214,24 @@ function whatsapp(id) {
     `<p class="muted">Revisa el mensaje. El envío se realiza desde tu WhatsApp.</p>${text("whatsappText", "Mensaje", message)}<div class="actions section-gap">${button("Copiar mensaje", "copy-whatsapp", "file")}${phone.length >= 10 ? `<a class="btn primary" id="whatsapp-link" href="https://wa.me/${E(phone)}?text=${encodeURIComponent(message)}" target="_blank" rel="noopener noreferrer">Abrir WhatsApp ${icon("arrow")}</a>` : '<p class="muted">Registra un teléfono con indicativo de país para abrir WhatsApp.</p>'}</div>`,
   );
 }
+let exportBusy = false;
 async function handleAction(action, id, el) {
   if (mainBusy) return toast("Espera a que termine el guardado.");
+  if (action.startsWith("export-")) {
+    if (exportBusy) return toast("Se está preparando el archivo Excel.");
+    exportBusy = true;
+    if (el) el.disabled = true;
+    try {
+      toast("Preparando archivo Excel…");
+      if (action === "export-expenses") await exportExpenses();
+      else await exportData(action.slice(7), id);
+      toast("Archivo Excel preparado.");
+    } finally {
+      exportBusy = false;
+      if (el) el.disabled = false;
+    }
+    return;
+  }
   if (
     [
       "dashboard",
@@ -3522,9 +3551,6 @@ async function handleAction(action, id, el) {
     case "print-expense":
       printExpense(id);
       break;
-    case "export-expenses":
-      exportExpenses();
-      break;
     case "transfer-metal":
       simpleModal(
         "Traslado de metal propio",
@@ -3784,8 +3810,7 @@ async function handleAction(action, id, el) {
       renderAuth();
       break;
     default:
-      if (action.startsWith("export-")) exportData(action.slice(7), id);
-      else toast("Acción no disponible.", true);
+      toast("Acción no disponible.", true);
   }
 }
 document.addEventListener("click", async (e) => {

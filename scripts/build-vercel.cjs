@@ -10,6 +10,8 @@ const allowed = [
   "numbers.js",
   "labor-estimate.js",
   "transport.js",
+  "excel-export.js",
+  "exceljs.min.js",
   "styles.css",
   "icon.svg",
 ];

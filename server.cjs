@@ -453,6 +453,28 @@ function createApp(options = {}) {
             },
           );
         }
+        if (pathname === "/api/audit-export" && req.method === "GET") {
+          D.permit(a, "reports");
+          const from = url.searchParams.get("from"),
+            to = url.searchParams.get("to");
+          const valid = value =>
+            /^\d{4}-\d{2}-\d{2}$/.test(value || "") &&
+            Number.isFinite(Date.parse(value)) &&
+            new Date(value).toISOString().slice(0, 10) === value;
+          D.assert(valid(from) && valid(to) && from <= to,
+            "Selecciona un período de exportación válido.");
+          const before = Number(url.searchParams.get("before") || Number.MAX_SAFE_INTEGER);
+          D.assert(Number.isSafeInteger(before) && before > 0,
+            "Cursor de exportación inválido.");
+          const start = new Date(from + "T00:00:00-05:00").toISOString();
+          const end = new Date(Date.parse(to + "T00:00:00-05:00") + 86400000).toISOString();
+          const rows = await db.prepare(
+            "SELECT * FROM audit WHERE at>=? AND at<? AND id<? ORDER BY id DESC LIMIT 1000",
+          ).all(start, end, before);
+          return await json(res, 200, {
+            rows, next: rows.length === 1000 ? rows[rows.length - 1].id : null,
+          });
+        }
         if (pathname === "/api/state" && req.method === "GET") {
           const s = await read();
           return await json(res, 200, {
@@ -724,6 +746,8 @@ function createApp(options = {}) {
         "/numbers.js": ["numbers.js", "text/javascript; charset=utf-8"],
         "/labor-estimate.js": ["labor-estimate.js", "text/javascript; charset=utf-8"],
         "/transport.js": ["transport.js", "text/javascript; charset=utf-8"],
+        "/excel-export.js": ["excel-export.js", "text/javascript; charset=utf-8"],
+        "/exceljs.min.js": ["exceljs.min.js", "text/javascript; charset=utf-8"],
         "/styles.css": ["styles.css", "text/css; charset=utf-8"],
         "/icon.svg": ["icon.svg", "image/svg+xml"],
       };

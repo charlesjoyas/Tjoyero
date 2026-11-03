@@ -30,7 +30,7 @@
       ]
     },
     {
-      "source": "/(app.js|numbers.js|labor-estimate.js|transport.js|styles.css|index.html)",
+      "source": "/(app.js|numbers.js|labor-estimate.js|transport.js|excel-export.js|exceljs.min.js|styles.css|index.html)",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]

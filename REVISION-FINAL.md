@@ -28,3 +28,13 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 ## Alcance
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
+
+## Revisión de exportaciones a Excel
+
+- Se sustituyen las seis descargas CSV existentes por archivos `.xlsx`: libro de metales, cobros, gastos, ventas, auditoría y soporte individual de traslados.
+- Celdas numéricas sumables, importes en pesos enteros con dos decimales visibles, bruto con tres y fino con seis. Fechas reales con hora de Bogotá y textos que conservan sus ceros iniciales sin ejecutar fórmulas.
+- Se corrige la descarga incompleta de auditoría: obtiene todo el período en páginas de 1.000 registros, con permisos de administrador o contabilidad, sin depender de los últimos 2.000 eventos cargados en pantalla.
+- Se respetan filtros de cuenta, metal, ley, propietario, fechas, categorías y medio de pago según la sección. Los cobros incorporan cliente, soporte bancario, responsable y turno; los traslados conservan su costo histórico exacto y su estado de reversión.
+- Encabezados fijos, autofiltros, columnas con formato y hojas válidas cuando no hay datos. Se indican períodos invertidos y datos inválidos; un error al cargar el generador permite reintentar.
+- Verificación: 76 pruebas de Node aprobadas y siete recorridos de navegador, incluidos todos los archivos descargados, auditoría de más de 2.200 eventos, reversados, textos con aspecto de fórmula, reintento, nube y 20 vistas en seis anchos. Las pruebas abren los `.xlsx` generados y comprueban sus celdas y tipos; no se ha hecho una prueba manual en Microsoft Excel de escritorio.
+- El bundle oficial de ExcelJS 4.4.0 queda incluido localmente con licencia MIT y script de reproducción que verifica su SHA-512. El build y el paquete de Vercel incluyen los archivos nuevos sin incorporar datos del taller ni credenciales.
