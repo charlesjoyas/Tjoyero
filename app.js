@@ -924,9 +924,10 @@ function dashboard() {
 }
 function ordersPage() {
   const q = (filters.orderQ || "").toLowerCase(),
-    st = filters.orderStatus || "",
+    st = filters.orderStatus === "cancelled" ? "" : filters.orderStatus || "",
     orders = S.orders.filter(
       (o) =>
+        o.status !== "cancelled" &&
         (!st || o.status === st) &&
         `${o.code} ${o.description} ${client(o)}`.toLowerCase().includes(q),
     );
@@ -940,6 +941,7 @@ function ordersPage() {
     `<section class="card table-card"><div class="filters"><div class="search-box">${icon("search")}<input class="control" id="order-search" data-filter="orderQ" placeholder="Buscar por orden, cliente o trabajo…" value="${E(filters.orderQ || "")}"></div><select class="control" data-filter="orderStatus" aria-label="Filtrar por estado">${option("", "Todos los estados", st)}${Object.entries(
       statusNames,
     )
+      .filter(([key]) => key !== "cancelled")
       .map(([k, v]) => option(k, v, st))
       .join(
         "",
