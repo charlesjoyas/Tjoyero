@@ -982,7 +982,7 @@ function receivePage() {
         )) +
     formWrap(
       "receive-form",
-      `<div class="grid two"><section class="card"><div class="card-head"><div><h2>La pieza y su propietario</h2><p>El metal recibido queda en custodia del cliente.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect()}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2>Acuerdo de trabajo</h2><p>Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}${moneyField("materialPrice", "Piedras e insumos · COP")}${moneyField("goldPrice", "Metal vendido por el taller · COP")}${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
+      `<div class="grid two"><section class="card"><div class="card-head"><div><h2>La pieza y su propietario</h2><p>El metal recibido queda en custodia del cliente.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect()}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2>Acuerdo de trabajo</h2><p>Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}${moneyField("goldPrice", "Metal vendido por el taller · COP")}${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
       "Registrar orden y abrir detalle",
     )
   );
@@ -1006,6 +1006,42 @@ function quotePreview(form) {
   const el = $("#quote-preview");
   if (el)
     el.innerHTML = `Subtotal ${cop(base)} · Impuesto ${cop(tax)}<strong>Presupuesto total: ${cop(base + tax)}</strong>`;
+  const summary = $("#labor-estimate-summary", form);
+  if (summary) {
+    const estimate = form.elements.laborEstimate.value;
+    summary.innerHTML = estimate ? laborEstimateSummary(JSON.parse(estimate), Number(b.labor || 0)) : "";
+  }
+}
+function laborEstimateSummary(x, charged, expanded = false) {
+  const unit = x.mode === "weight" ? "g" : "horas";
+  return `<details class="calculator"${expanded ? " open" : ""}><summary>Estimado de mano de obra: ${cop(x.suggested)}</summary>${row("Base de cálculo", number(x.quantity, 3) + " " + unit + " × " + cop(x.rate))}${row("Costo directo estimado", cop(x.directCost))}${row("Costos indirectos", cop(x.overhead))}${row("Costo base estimado", cop(x.baseCost))}${row("Recargo sobre costo", number(x.markup) + " %")}${row("Cobro mínimo", cop(x.minimum))}${row("Sugerido antes de impuestos", cop(x.suggested))}${charged !== undefined && charged !== x.suggested ? `<p class="muted">El valor de mano de obra se ajustó manualmente a ${cop(charged)}.</p>` : ""}</details>`;
+}
+function estimateLaborModal() {
+  const reception = $("#receive-form");
+  if (!reception) return;
+  const x = reception.elements.laborEstimate.value ? JSON.parse(reception.elements.laborEstimate.value) : {};
+  modal("Estimar mano de obra", `<p class="muted">Calcula el costo del trabajo por horas o gramos. Usa los costos reales de tu taller; el recargo se aplica sobre el costo, antes de impuestos. El metal y los insumos se cotizan por separado.</p><div class="form-grid section-gap">${select("mode", "Base de cálculo", [["time", "Por horas"], ["weight", "Por gramos"]], x.mode || "time")}${field("quantity", "Horas estimadas", "number", x.quantity ?? 1, 'min="0.001" max="1000000" step="0.001" required')}${moneyField("rate", "Costo de mano de obra por hora · COP", x.rate ?? 0)}${moneyField("overhead", "Costos indirectos de este trabajo · COP", x.overhead ?? 0)}${field("markup", "Recargo sobre costo (%)", "number", x.markup ?? 0, 'min="0" max="1000" step="0.01" required')}${moneyField("minimum", "Cobro mínimo de mano de obra · COP", x.minimum ?? 0)}<div id="labor-preview" class="span-2"></div><p class="muted span-2">Sugerido = máximo entre el cobro mínimo y (cantidad × costo unitario + costos indirectos) × (1 + recargo / 100). Se redondea hacia arriba a pesos enteros. Usa 0,50 horas para media hora.</p></div>`, (b) => {
+    const estimate = window.TallerLabor.calculate(b);
+    setNumericValue(reception.elements.labor, estimate.suggested);
+    reception.elements.laborEstimate.value = JSON.stringify(estimate);
+    dirty = true;
+    quotePreview(reception);
+  }, "Aplicar estimado al presupuesto");
+  $("#modal-form").elements.rate.setAttribute("min", "1");
+  updateLaborPreview();
+}
+function updateLaborPreview() {
+  const form = $("#modal-form");
+  if (!form || !$("#labor-preview", form)) return;
+  const byWeight = form.elements.mode.value === "weight";
+  form.elements.quantity.closest("label").querySelector("span").textContent = byWeight ? "Gramos a trabajar (estimados)" : "Horas estimadas";
+  form.elements.rate.closest("label").querySelector("span").textContent = byWeight ? "Costo de mano de obra por gramo · COP" : "Costo de mano de obra por hora · COP";
+  try {
+    const estimate = window.TallerLabor.calculate(inputData(form));
+    $("#labor-preview", form).innerHTML = laborEstimateSummary(estimate, undefined, true);
+  } catch (e) {
+    $("#labor-preview", form).innerHTML = notice("Completa el cálculo", e.message, "amber");
+  }
 }
 function orderDetail(o) {
   if (!o)
@@ -1171,6 +1207,7 @@ function orderDetail(o) {
     row("Total", cop(total(o)), "total") +
     row("Abonos", cop(paid(o))) +
     row("Saldo", cop(due(o)), "debt");
+  if (o.laborEstimate) account += laborEstimateSummary(o.laborEstimate, o.labor);
   if (o.invoice) account += row("Comprobante de entrega", E(o.invoice));
   account +=
     '<p class="muted section-gap" style="font-size:10px">La venta se reconoce al entregar. El metal del cliente no se cobra como venta.</p>';
@@ -2532,6 +2569,8 @@ function bindPage() {
       const b = inputData(f),
         unlock = lockMainForm(f);
       try {
+        if (b.laborEstimate) b.laborEstimate = JSON.parse(b.laborEstimate);
+        else delete b.laborEstimate;
         if (photoPromise) await photoPromise;
         delete b.photo;
         b.photo = receivedPhoto;
@@ -3040,6 +3079,9 @@ async function handleAction(action, id, el) {
       break;
     case "new-purchase":
       newPurchase();
+      break;
+    case "estimate-labor":
+      estimateLaborModal();
       break;
     case "edit-order":
       editOrder(id);
@@ -3665,6 +3707,7 @@ function updateModalCalculations(el) {
   const f = $("#modal-form");
   if (!f) return;
   const b = inputData(f);
+  if ($("#labor-preview", f)) updateLaborPreview();
   if ($("#opening-preview")) updateShiftOpening();
   if ($("#payment-preview")) {
     if (el.name === "metal")

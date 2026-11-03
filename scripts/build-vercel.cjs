@@ -8,6 +8,7 @@ const allowed = [
   "index.html",
   "app.js",
   "numbers.js",
+  "labor-estimate.js",
   "transport.js",
   "styles.css",
   "icon.svg",

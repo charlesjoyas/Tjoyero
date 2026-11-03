@@ -8,7 +8,7 @@ if (-not ([System.IO.Path]::GetFullPath($packageArchive).StartsWith($packageWork
 }
 $packageFiles = @(
     'package.json', 'pnpm-lock.yaml', 'vercel.json', '.vercelignore', '.gitignore', '.env.example',
-    'index.html', 'app.js', 'numbers.js', 'transport.js', 'styles.css', 'icon.svg',
+    'index.html', 'app.js', 'numbers.js', 'labor-estimate.js', 'transport.js', 'styles.css', 'icon.svg',
     'server.cjs', 'domain.cjs', 'storage-schema.cjs', 'cloud-storage.cjs', 'transfers.cjs',
     'api/index.js', 'scripts/build-vercel.cjs', 'scripts/migrate-turso.cjs',
     'scripts/export-cloud-backup.cjs', 'scripts/package-vercel.ps1', 'VERCEL.md', 'README.md'

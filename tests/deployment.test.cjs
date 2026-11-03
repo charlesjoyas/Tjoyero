@@ -78,6 +78,7 @@ test(
       "domain.cjs",
       "app.js",
       "numbers.js",
+      "labor-estimate.js",
     "transport.js",
     "transfers.cjs",
     "storage-schema.cjs",
@@ -174,6 +175,7 @@ test(
       "/",
       "/app.js",
       "/numbers.js",
+      "/labor-estimate.js",
       "/styles.css",
       "/icon.svg",
     ]) {

@@ -719,6 +719,7 @@ function createApp(options = {}) {
         "/index.html": ["index.html", "text/html; charset=utf-8"],
         "/app.js": ["app.js", "text/javascript; charset=utf-8"],
         "/numbers.js": ["numbers.js", "text/javascript; charset=utf-8"],
+        "/labor-estimate.js": ["labor-estimate.js", "text/javascript; charset=utf-8"],
         "/transport.js": ["transport.js", "text/javascript; charset=utf-8"],
         "/styles.css": ["styles.css", "text/css; charset=utf-8"],
         "/icon.svg": ["icon.svg", "image/svg+xml"],

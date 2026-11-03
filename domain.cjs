@@ -1,5 +1,6 @@
 "use strict";
 const { randomUUID } = require("node:crypto");
+const Labor = require("./labor-estimate.js");
 const id = () => randomUUID();
 const now = () => new Date().toISOString();
 const day = () =>
@@ -318,7 +319,14 @@ function quote(s, b) {
     ((labor + materialPrice + goldPrice) * taxPercent) / 100,
   );
   money(labor + materialPrice + goldPrice + tax, "Total del presupuesto");
-  return { labor, materialPrice, goldPrice, taxPercent, tax };
+  let laborEstimate;
+  if (b.laborEstimate !== undefined) {
+    try {
+      laborEstimate = Labor.calculate(b.laborEstimate);
+    } catch (e) { fail(e.message); }
+  }
+  return { labor, materialPrice, goldPrice, taxPercent, tax,
+    ...(laborEstimate ? {laborEstimate} : {}) };
 }
 function allocate(amount, caps) {
   const sum = caps.reduce((a, b) => a + b, 0);
@@ -1750,6 +1758,13 @@ function validateState(s) {
     ])
       money(o[key], "Valor de orden");
     money(total(o), "Presupuesto total");
+    if (o.laborEstimate !== undefined) {
+      let calculated;
+      try { calculated = Labor.calculate(o.laborEstimate); }
+      catch (e) { fail(e.message); }
+      for (const key of Object.keys(calculated))
+        assert(o.laborEstimate[key] === calculated[key], "Estimado de mano de obra inválido.");
+    }
     assert(
       paid(s, o) >= 0 && due(s, o) >= 0,
       "Abonos incompatibles con el presupuesto.",

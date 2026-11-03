@@ -21,6 +21,8 @@ La interfaz usa **formato colombiano** en formularios, tablas, resúmenes, compr
 
 **Nueva orden → asignación a mesa → avances / consumos → pesaje de pieza y limalla → control de calidad → cobro completo → entrega.**
 
+Al recibir un trabajo, **Estimar mano de obra** calcula un sugerido por horas o gramos usando el costo unitario del taller, los costos indirectos, un recargo sobre costo y un cobro mínimo. El usuario decide cuándo aplicarlo al presupuesto y puede ajustar el cobro. El desglose queda guardado en la orden; los impuestos se calculan en el presupuesto y el metal y los insumos se cotizan por separado. No utiliza tarifas de mercado predeterminadas.
+
 - La recepción conserva cliente, descripción, estado, piedras, fotografía opcional, ley, peso, medidas, presupuesto y fecha prometida.
 - El metal recibido con la pieza es **custodia**, sin abono monetario. El metal como pago se registra después, desde **Registrar abono**.
 - Las salidas y aportes adicionales requieren existencias de la misma ley y metal. Ninguna cuenta admite saldo negativo.

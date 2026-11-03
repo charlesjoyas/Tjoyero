@@ -6,7 +6,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 60,
-      "includeFiles": "{server.cjs,domain.cjs,storage-schema.cjs,cloud-storage.cjs,transfers.cjs}"
+      "includeFiles": "{server.cjs,domain.cjs,labor-estimate.js,storage-schema.cjs,cloud-storage.cjs,transfers.cjs}"
     }
   },
   "rewrites": [
@@ -30,7 +30,7 @@
       ]
     },
     {
-      "source": "/(app.js|numbers.js|transport.js|styles.css|index.html)",
+      "source": "/(app.js|numbers.js|labor-estimate.js|transport.js|styles.css|index.html)",
       "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
     }
   ]
