@@ -339,6 +339,14 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
+    case "category.delete": {
+      permit(a, "settings");
+      const categories = s.settings.goldCategories || defaultGoldCategories();
+      const category = categories.find((x) => x.id === b.id);
+      assert(category, "Categoría no encontrada.", 404);
+      s.settings.goldCategories = categories.filter((x) => x.id !== category.id);
+      return { id: category.id, name: category.name };
+    }
     case "category.save": {
       permit(a, "settings");
       const categories = s.settings.goldCategories || defaultGoldCategories();

@@ -26,6 +26,13 @@ test("Categorías: leyes, nombres, permisos y compatibilidad con copias anterior
   const duplicate = structuredClone(s);
   duplicate.settings.goldCategories.push({...duplicate.settings.goldCategories[0],id:"duplicado"});
   assert.throws(()=>D.validateState(duplicate),/duplicada/);
+  assert.throws(()=>D.execute(s,"category.delete",{id:category.id},{role:"recepcion"}),/rol/);
+  assert.throws(()=>D.execute(s,"category.delete",{id:"missing"},admin),/encontrada/);
+  for (const x of [...s.settings.goldCategories]) D.execute(s,"category.delete",{id:x.id},admin);
+  assert.deepEqual(s.settings.goldCategories,[]);
+  D.validateState(s);
+  D.execute(s,"category.save",{name:"Única categoría",purity:750},admin);
+  assert.equal(s.settings.goldCategories.length,1,"Las categorías eliminadas no reaparecen");
 });
 
 test("Categorías API: estado antiguo, guardado persistente, auditoría y rechazo de ley inválida", async () => {
@@ -43,7 +50,7 @@ test("Categorías API: estado antiguo, guardado persistente, auditoría y rechaz
     const read=async()=> (await (await fetch(base+"/api/state",{headers:{Cookie:cookie}})).json()).state;
     let state=await read();
     assert.ok(state.settings.goldCategories.some(x=>x.purity===585));
-    const send=async(data)=>fetch(base+"/api/action",{method:"POST",headers:{Cookie:cookie,"Content-Type":"application/json","If-Match":String(state.revision),"Idempotency-Key":randomUUID()},body:JSON.stringify({action:"category.save",data})});
+    const send=async(data,action="category.save")=>fetch(base+"/api/action",{method:"POST",headers:{Cookie:cookie,"Content-Type":"application/json","If-Match":String(state.revision),"Idempotency-Key":randomUUID()},body:JSON.stringify({action,data})});
     assert.equal((await send({name:"Oro 16k",purity:667})).status,200);
     state=await read();
     const category=state.settings.goldCategories.find(x=>x.name==="Oro 16k");
@@ -61,5 +68,13 @@ test("Categorías API: estado antiguo, guardado persistente, auditoría y rechaz
     const stored=JSON.parse(app.db.prepare("SELECT json FROM state WHERE id=1").get().json);
     D.validateState(stored);
     assert.equal(stored.settings.goldCategories.find(x=>x.id===category.id).active,false);
+    const history=JSON.stringify({orders:state.orders,ledger:state.ledger});
+    assert.equal((await send({id:category.id},"category.delete")).status,200);
+    state=await read();
+    assert.equal(state.settings.goldCategories.some(x=>x.id===category.id),false);
+    assert.equal(JSON.stringify({orders:state.orders,ledger:state.ledger}),history);
+    assert.ok(app.db.prepare("SELECT id FROM audit WHERE action='category.delete'").get());
+    assert.equal((await send({id:category.id},"category.delete")).status,404);
+    assert.equal((await read()).revision,state.revision);
   } finally {await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 });

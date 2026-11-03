@@ -1939,7 +1939,7 @@ function usersPage() {
 }
 function categoriesPage() {
   return head("EL ORO DE TU TALLER", "Categorías de oro", "Define los tipos de oro y su ley en milésimas para usarlos en las operaciones del taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
-    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), button("Editar", "edit-category", "edit", "small", x.id)])).join("")));
+    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar o eliminar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), `<div class="actions">${button("Editar", "edit-category", "edit", "small", x.id)}${button("Eliminar", "delete-category", "", "small danger", x.id)}</div>`])).join("")));
 }
 function categoryModal(id) {
   const x = goldCategories().find((x) => x.id === id) || {};
@@ -2025,6 +2025,7 @@ function assistantPage() {
 }
 function actionLabel(a) {
   const labels = {
+    "category.delete": "Categoría eliminada",
     "category.save": "Categoría guardada",
     "client.save": "Cliente guardado",
     "order.create": "Orden recibida",
@@ -3028,6 +3029,12 @@ async function handleAction(action, id, el) {
     case "edit-category":
       categoryModal(id);
       break;
+    case "delete-category": {
+      const category = goldCategories().find((x) => x.id === id);
+      if (!category) throw new Error("Categoría no encontrada.");
+      simpleModal("Eliminar categoría de oro", "category.delete", notice("¿Eliminar " + category.name + "?", "Dejará de aparecer en el catálogo y en los formularios. Las órdenes, los saldos y los movimientos anteriores conservan su ley original.", "amber"), { id }, "Eliminar categoría");
+      break;
+    }
     case "edit-supplier":
       supplierModal(id);
       break;
