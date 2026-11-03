@@ -12,6 +12,21 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: reversión completa de orden en calidad, vista previa bancaria e idempotencia",async t=>{
+  const f=await fixture(t);
+  await f.request("/api/setup",{workshop:"Reversión completa",name:"Admin",username:"admin",password:"1234",setupKey});
+  const client=(await f.act("client.save",{name:"Cliente"})).body.result,smith=(await f.act("smith.save",{name:"Orfebre",bench:"Mesa"})).body.result;
+  await f.act("shift.open",{opening:100000});
+  const order=(await f.act("order.create",{clientId:client.id,type:"Reparación",description:"Trabajo devuelto",condition:"Recibido",metal:"oro",purity:750,receivedWeight:2,dueDate:"2026-12-01",labor:10000,taxPercent:0})).body.result;
+  await f.act("order.assign",{id:order.id,smithId:smith.id,customerWeight:2});await f.act("order.return",{id:order.id,pieceWeight:1.98,scrapWeight:0.01});
+  await f.act("payment.create",{orderId:order.id,bank:10000,bankRef:"BANCO-001"});
+  const payload={type:"order",id:order.id,reason:"Trabajo cancelado con devolución física",refundMethod:"bank",reference:"DEV-BANCO-001",confirmed:true},before=await f.state();
+  const preview=await f.request("/api/reversal-preview",payload);assert.equal(preview.status,200);assert.equal(preview.body.bankDelta,-10000);assert.equal(preview.body.cashDelta,0);assert.deepEqual(await f.state(),before);
+  const key=randomUUID();assert.equal((await f.act("operation.reverse",payload,key)).status,200);const closed=await f.state();assert.equal(closed.orders[0].status,"cancelled");
+  assert.equal((await f.act("operation.reverse",payload,key)).status,200);assert.deepEqual(await f.state(),closed);
+  await f.open();assert.deepEqual(await f.state(),closed);
+});
+
 test("Nube: asignación multimetal atómica, reintentos, retorno y restauración conservan cada inventario",async t=>{
   const f=await fixture(t);
   await f.request("/api/setup",{workshop:"Multimetal",name:"Admin",username:"admin",password:"1234",setupKey});

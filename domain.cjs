@@ -377,7 +377,7 @@ function execute(s, action, b, a) {
   switch (action) {
     case "operation.reverse": {
       permit(a,"adjust");
-      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity,money,PM});
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM});
     }
     case "category.delete": {
       permit(a, "settings");

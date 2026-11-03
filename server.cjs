@@ -499,6 +499,7 @@ function createApp(options = {}) {
           const result=D.execute(next,"operation.reverse",data,a);
           D.validateState(next);
           let bankDelta=0;
+          if(data.type==="order")bankDelta=next.payments.slice(before.payments.length).reduce((sum,p)=>sum+(p.bank||0),0);
           if(data.type==="payment")bankDelta=-(before.payments.find(x=>x.id===data.id)?.bank||0);
           if(["supplierPayment","settlement","expense"].includes(data.type)){
             const payment=(data.type==="supplierPayment"?before.supplierPayments:data.type==="expense"?(before.expenses||[]):before.settlements).find(x=>x.id===data.id);

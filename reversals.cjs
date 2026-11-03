@@ -96,8 +96,43 @@ module.exports = function reverse(s, b, a, D) {
     }
     case "order": {
       const o=get(s,"orders",b.id);
-      execute(s,"order.cancel",{id:o.id,reason,reference},a);
-      return s.reversals.at(-1);
+      assert(o.status!=="cancelled","La orden ya fue reversada.",409);
+      record.original={status:o.status,invoice:o.invoice||null,deliveredAt:o.deliveredAt||null};
+      if(o.stockId){
+        const stock=get(s,"stock",o.stockId);
+        assert(!stock.transfers.some(x=>!x.reversedAt),"Revierte primero las transferencias de piezas de esta orden y verifica su devolución al taller.");
+        execute(s,"operation.reverse",{type:"stockReceive",id:stock.id,reason,reference,confirmed:true},a);
+      }else if(o.status==="delivered"){
+        assert(o.invoice,"La entrega no conserva un comprobante válido para reversarla.");
+        execute(s,"operation.reverse",{type:"sale",id:o.id,reason,reference,confirmed:true},a);
+      }
+      if(o.status==="in_progress"&&!o.returned){
+        assert(b.metalReturns!==undefined,"Registra los pesos devueltos de cada metal para cerrar la orden en producción.");
+        execute(s,"order.return",{id:o.id,metalReturns:b.metalReturns,reason},a);
+      }
+      assert(o.status==="received"||(["quality","ready"].includes(o.status)&&o.returned),"La orden no tiene un retorno válido para cerrar sus metales.");
+      const refund=paid(s,o);
+      if(refund>0){
+        assert(["cash","bank"].includes(b.refundMethod),"Elige cómo devolver el saldo abonado al cliente.");
+        bankProof(b.refundMethod);
+        const payment=execute(s,"payment.refund",{orderId:o.id,cash:b.refundMethod==="cash"?refund:0,bank:b.refundMethod==="bank"?refund:0,bankRef:reference,reason},a);
+        record.refund={code:payment.code,amount:refund,method:b.refundMethod};
+      }
+      assert(paid(s,o)===0,"El saldo abonado debe quedar devuelto antes de cerrar la orden.");
+      const recovered=[];
+      if(o.returned)for(const group of PM.groups(o)){
+        const mg=group.indexes.reduce((sum,index)=>sum+(o.allocations[index].owner==="taller"?o.returned.pieces[index]:0),0);
+        if(mg){move(s,a,"finished","own",mg,group.metal,group.purity,"taller",ref,"Metal propio recuperado al reversar "+o.code+": "+reason);recovered.push({metal:group.metal,purity:group.purity,mg});}
+      }
+      for(const account of ["custody","scrap"]){
+        // La custodia es exclusiva de esta orden; se devuelven pieza y sobrantes reales.
+        const rows=D.balances(s).filter(x=>x.owner===o.id&&x.account===account);
+        for(const x of rows)move(s,a,account,"cliente",x.mg,x.metal,x.purity,o.id,ref,"Devolución al reversar orden "+o.code+": "+reason);
+      }
+      o.status="cancelled";mark(o);record.recovered=recovered;
+      timeline(o,a,"Orden reversada completamente y retirada de trabajos: "+reason);
+      record.summary="Orden "+o.code+" reversada y retirada de las órdenes de trabajo. Pieza y sobrantes del cliente devueltos; metal propio de la pieza recuperado en bodega. "+(refund?"Saldo de "+refund+" COP devuelto en "+(b.refundMethod==="cash"?"efectivo":"banco")+". ":"Sin saldo abonado pendiente. ")+"La merma, los insumos consumidos y los honorarios de trabajo realizado se conservan; la limalla propia permanece en su cuenta.";
+      break;
     }
     case "assignment": {
       const o=get(s,"orders",b.id);

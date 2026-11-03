@@ -1213,6 +1213,7 @@ function orderDetail(o) {
   if (o.status === "delivered" && o.invoice) operations += reversalButton("sale",o.id);
   if (o.status === "in_progress") operations += reversalButton("assignment",o.id);
   if (o.status === "ready") operations += reversalButton("quality",o.id);
+  if (o.status !== "cancelled") operations += allowed("adjust","Reversar orden completa","reverse-operation","refresh","danger","order|"+o.id);
   if (find("clients", o.clientId)?.phone)
     operations += button("Preparar mensaje WhatsApp", "whatsapp", "", "", o.id);
   const sum = (owner) =>
@@ -2104,7 +2105,7 @@ const reversalTypes = [
   ["expense","Gasto del taller"],
   ["purchase","Compra de metal"],["supplierPayment","Pago a proveedor"],
   ["sale","Entrega / venta al cliente"],["payment","Cobro o devolución al cliente"],
-  ["order","Orden sin producción ni abonos"],["cash","Ingreso / gasto manual de caja"],
+  ["order","Orden de trabajo completa"],["cash","Ingreso / gasto manual de caja"],
   ["ledger","Traslado / ajuste de metal"],["material","Entrada / consumo de insumos"],
   ["stockTransfer","Transferencia de piezas"],["stockReceive","Ingreso de piezas terminadas"],
   ["settlement","Pago al orfebre"],
@@ -2119,7 +2120,7 @@ function reversalCandidates(type) {
   if(type==="supplierPayment")rows=S.supplierPayments.filter(x=>!x.reversedAt).map(x=>[x.id,(find("purchases",x.purchaseId)?.code||"")+" · "+cop(x.amount)+" · "+x.reference]);
   if(type==="sale")rows=S.orders.filter(x=>x.status==="delivered"&&x.invoice&&x.type!=="Producción propia").map(x=>[x.id,x.invoice+" · "+x.code+" · "+client(x)]);
   if(type==="payment")rows=S.payments.filter(x=>!x.voidedAt&&!x.reversedAt).map(x=>[x.id,x.code+" · "+cop(x.applied)+" · "+(find("orders",x.orderId)?.code||"")]);
-  if(type==="order")rows=S.orders.filter(x=>x.status==="received").map(x=>[x.id,x.code+" · "+x.description]);
+  if(type==="order")rows=S.orders.filter(x=>x.status!=="cancelled").map(x=>[x.id,x.code+" · "+statusNames[x.status]+" · "+x.description]);
   if(type==="cash")rows=S.cashEntries.filter(x=>x.ref==="CAJA"&&!x.expenseId&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.note+" · "+cop(x.amount)]);
   if(type==="ledger")rows=S.ledger.filter(x=>["TRASLADO","CONCILIACIÓN"].includes(x.ref)&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.ref+" · "+x.metal+" · "+weight(x.mg)]);
   if(type==="material")rows=S.materialMoves.filter(x=>!x.reversedAt&&!x.reversalId).map(x=>[x.id,dt(x.at)+" · "+(find("materials",x.materialId)?.name||"")+" · "+quantity(x.quantity)+" · "+x.note]);
@@ -2133,6 +2134,7 @@ function reversalCandidates(type) {
 function reversalsPage() {
   return head("CORREGIR CON TRAZABILIDAD","Reversiones","Revisa la operación, su efecto y el soporte antes de confirmar.",button("Reversar operación","reverse-operation","refresh","primary"))+
     notice("Se conserva el movimiento original","Las reversiones registran movimientos contrarios. Los cierres de caja anteriores no se reabren; las devoluciones en efectivo se registran en el turno abierto.","blue")+
+    notice("Para retirar un trabajo completo","Elige «Orden de trabajo completa». Incluye trabajos recibidos, en mesa, en calidad, listos o entregados. Revisa los pesos y el saldo a devolver antes de confirmar; la orden saldrá del listado y conservará su historial.","blue")+
     `<div class="grid two section-gap">${card("Compras y pagos","",'<p>Primero revierte los pagos de una compra y después la compra, si el metal sigue disponible. En pagos bancarios registra el soporte real de la devolución.</p>')}${card("Ventas y devoluciones","",'<p>Reversar una entrega devuelve la pieza y los sobrantes registrados y reabre la orden. Los cobros se conservan: revierte o devuelve los pagos por separado.</p>')}</div>`+
     `<div class="section-gap">${notice("Operaciones que requieren revisión","Una fundición, una merma física, la producción ya terminada y los cierres de caja no se deshacen automáticamente. El sistema bloquea reversiones sin existencias, duplicadas o con operaciones dependientes.","amber")}</div>`+
     card("Historial de reversiones","Se conserva también en las copias de seguridad y la auditoría.",table(["Fecha / responsable","Operación","Resultado","Motivo / soporte"],[...(S.reversals||[])].reverse().map(x=>tr([dt(x.at)+"<small>"+E(x.actor)+"</small>",E(reversalTypes.find(t=>t[0]===x.type)?.[1]||x.type)+"<small>"+E(reversalReference(x))+"</small>",E(x.summary),E(x.reason)+"<small>"+E(x.reference)+"</small>"])).join("")));
@@ -2148,7 +2150,8 @@ function reverseOperationModal(type="purchase",targetId="") {
   let prepared=null;
   modal("Revisar reversión",notice("Verifica la devolución real","Esta pantalla registra la corrección; no mueve dinero en tu banco ni devuelve físicamente una pieza. Confirma solo después de comprobar lo sucedido.","amber")+
     `<div class="form-grid section-gap">${select("type","Tipo de operación",reversalTypes,type)}${select("id","Registro original",rows.length?rows:[["","No hay registros disponibles"]],targetId||rows[0]?.[0]||"")}<div id="reverse-metal-source" class="span-2">${select("metalSource","Origen del metal a devolver al cliente",[["payment","Metal recibido como pago en caja"],["own","Metal propio en bodega"]],"payment")}</div><div class="span-2">${field("reason","Motivo de la reversión","text","",'required maxlength="1000"')}</div><div class="span-2">${field("reference","Soporte de devolución (obligatorio para banco)","text","",'maxlength="200"')}</div><label class="check span-2"><input type="checkbox" name="confirmed" required>He verificado el registro y la devolución de dinero, piezas o material, o que se trata de un registro erróneo sin movimiento físico.</label><div id="reversal-preview" class="span-2"></div></div>`,async(b,form,key)=>{
-      const payload={...b,confirmed:true},signature=JSON.stringify(payload);
+      const order=b.type==="order"?find("orders",b.id):null;
+      const payload={...b,confirmed:true,...(order?.status==="in_progress"&&!order.returned?{metalReturns:PM.groups(order).map((g,i)=>({metal:g.metal,purity:g.purity,pieceWeight:b["reversePiece-"+i],scrapWeight:b["reverseScrap-"+i]}))}:{})},signature=JSON.stringify(payload);
       if(!prepared||prepared.signature!==signature) {
         const preview=await api("/api/reversal-preview",{method:"POST",body:JSON.stringify(payload)});
         prepared={signature,preview};
@@ -2160,9 +2163,19 @@ function reverseOperationModal(type="purchase",targetId="") {
       catch(e){prepared=null;$("#reversal-preview",form).replaceChildren();$('button[type="submit"]',form).textContent="Revisar reversión";throw e;}
     },"Revisar reversión");
   const form=$("#modal-form");
+  $("[name=confirmed]",form).closest("label").insertAdjacentHTML("beforebegin",'<div id="reverse-order-options" class="span-2"></div>');
   function updateSource(){
     const payment=S.payments.find(x=>x.id===form.elements.id.value);
     $("#reverse-metal-source",form).hidden=form.elements.type.value!=="payment"||!payment?.goldMg;
+    const panel=$("#reverse-order-options",form),order=form.elements.type.value==="order"?find("orders",form.elements.id.value):null;
+    panel.hidden=!order;
+    if(order&&panel.dataset.orderId!==order.id){
+      panel.dataset.orderId=order.id;
+      panel.innerHTML=notice("Reversión completa de "+order.code,"La orden se retira de trabajos. Devuelve la pieza y los sobrantes del cliente; recupera en bodega el metal propio de la pieza. Las mermas, insumos consumidos y honorarios reales no se borran.","amber")+
+        (paid(order)>0?`<div class="form-grid section-gap">${select("refundMethod","Devolver saldo abonado: "+cop(paid(order)),[["cash","Efectivo del turno abierto"],["bank","Banco / transferencia en COP"]],"cash")}</div><p class="muted">La devolución es en pesos, incluso si el abono original incluía metal. Banco exige soporte. Debe existir un turno de caja abierto.</p>`:notice("Sin saldo abonado pendiente","No se generará una segunda devolución.","blue"))+
+        (order.status==="in_progress"&&!order.returned?PM.groups(order).map((g,i)=>`<section class="card section-gap"><h3>${E(g.metal)} · ley ${number(g.purity)}</h3><p>Entregado a mesa: ${weight(g.mg)}. Registra los pesos reales que regresan.</p><div class="form-grid">${weightField("reversePiece-"+i,"Metal devuelto en pieza / sin trabajar (g)","",true)}${weightField("reverseScrap-"+i,"Limalla devuelta (g)",0,true)}</div></section>`).join(""):"");
+    }
+    $$("input,select",panel).forEach(input=>{input.disabled=!order;});
   }
   updateSource();
   form.addEventListener("change",e=>{

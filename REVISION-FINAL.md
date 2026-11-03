@@ -29,6 +29,12 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
 
+## Reversión completa de órdenes con producción
+
+Se corrige el selector que solo ofrecía órdenes recibidas. «Orden de trabajo completa» incluye todas las órdenes no anuladas, con revisión de retorno para las que siguen en mesa, devolución del saldo neto abonado y cierre de la custodia. La recuperación del metal propio conserva su ley y metal; no se borran las pérdidas, insumos ni honorarios reales. Si existía una entrega de venta se compensa en la misma transacción; las transferencias de producción propia deben devolverse antes del cierre. Las reversiones anteriores y las devoluciones ya realizadas no se duplican.
+
+Se verifican órdenes en calidad como T-0001, ventas entregadas, retorno multimetal, pagos bancarios, idempotencia, persistencia con libSQL, vista previa sin escritura y uso del formulario en móvil. T-0001 se simuló con una copia en memoria de la base real, sin guardarla en producción, y quedó en estado anulado en la simulación.
+
 ## Varios metales propios en una pieza
 
 Asignar a mesa permite añadir y quitar aportes con metal, ley, peso y origen independientes. El inventario, las tarifas históricas, el retorno, la entrega y sus reversiones conservan cada composición, sin sumar gramos de plata como si fueran oro. La merma crítica se comprueba por metal, además de mostrar el total de la orden. La producción propia conserva su composición en existencias, traslados parciales y soportes Excel.
