@@ -463,6 +463,27 @@ function createApp(options = {}) {
             permissions: D.ROLES[a.role],
           });
         }
+        if (pathname === "/api/reversal-preview" && req.method === "POST") {
+          D.permit(a,"adjust");
+          const data=await body(req), before=await read(), next=structuredClone(before);
+          D.assert(data&&typeof data==="object"&&!Array.isArray(data),"Solicitud de reversión inválida.");
+          const result=D.execute(next,"operation.reverse",data,a);
+          D.validateState(next);
+          let bankDelta=0;
+          if(data.type==="payment")bankDelta=-(before.payments.find(x=>x.id===data.id)?.bank||0);
+          if(["supplierPayment","settlement"].includes(data.type)){
+            const payment=(data.type==="supplierPayment"?before.supplierPayments:before.settlements).find(x=>x.id===data.id);
+            if(payment?.method==="bank")bankDelta=payment.amount;
+          }
+          return await json(res,200,{
+            revision:before.revision,summary:result.summary,
+            bankDelta,
+            cashDelta:next.cashEntries.slice(before.cashEntries.length).reduce((v,x)=>v+x.amount,0),
+            movements:next.ledger.slice(before.ledger.length),
+            materials:next.materials.filter((x,i)=>x.quantity!==before.materials[i].quantity).map(x=>({name:x.name,quantity:x.quantity,unit:x.unit})),
+            stock:next.stock.filter((x,i)=>x.available!==before.stock[i].available).map(x=>({sku:x.sku,available:x.available})),
+          });
+        }
         if (pathname === "/api/backup" && req.method === "GET") {
           D.permit(a, "settings");
           await audit(a, "backup.download", {});

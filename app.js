@@ -431,11 +431,11 @@ async function load({ ifIdle = false } = {}) {
   PERM = d.permissions;
   return true;
 }
-async function mutate(action, data, key = crypto.randomUUID()) {
+async function mutate(action, data, key = crypto.randomUUID(), revision = S.revision) {
   try {
     const r = await api("/api/action", {
       method: "POST",
-      headers: { "If-Match": String(S.revision), "Idempotency-Key": key },
+      headers: { "If-Match": String(revision), "Idempotency-Key": key },
       body: JSON.stringify({ action, data }),
     });
     await load();
@@ -641,6 +641,7 @@ const navGroups = [
       ["purchases", "Compras y proveedores", "box"],
       ["stock", "Piezas terminadas", "gem"],
       ["reports", "Reportes y auditoría", "chart"],
+      ["reversals", "Reversiones", "refresh"],
       ["assistant", "Análisis del taller", "spark"],
     ],
   ],
@@ -676,6 +677,7 @@ function render() {
           .filter((x) => x[0] !== "settings" || can("settings"))
           .filter((x) => x[0] !== "categories" || can("settings"))
           .filter((x) => x[0] !== "reports" || can("reports"))
+          .filter((x) => x[0] !== "reversals" || can("adjust"))
           .map(
             ([key, label, ic]) =>
               `<button class="navbutton ${view === key ? "active" : ""}" data-nav="${key}">${icon(ic)}<span>${label}</span>${key === "orders" && S.orders.some(active) ? `<span class="count">${number(S.orders.filter(active).length)}</span>` : ""}</button>`,
@@ -745,6 +747,8 @@ function renderPage() {
       return can("users") ? usersPage() : notice("Acceso restringido");
     case "settings":
       return can("settings") ? settingsPage() : notice("Acceso restringido");
+    case "reversals":
+      return can("adjust") ? reversalsPage() : notice("Acceso restringido");
     case "categories":
       return can("settings") ? categoriesPage() : notice("Acceso restringido");
     case "assistant":
@@ -1185,6 +1189,9 @@ function orderDetail(o) {
       "",
       o.id,
     );
+  if (o.status === "delivered" && o.invoice) operations += reversalButton("sale",o.id);
+  if (o.status === "in_progress") operations += reversalButton("assignment",o.id);
+  if (o.status === "ready") operations += reversalButton("quality",o.id);
   if (find("clients", o.clientId)?.phone)
     operations += button("Preparar mensaje WhatsApp", "whatsapp", "", "", o.id);
   const sum = (owner) =>
@@ -1251,7 +1258,7 @@ function orderDetail(o) {
     row("Saldo", cop(due(o)), "debt");
   if (o.laborEstimate) account += laborEstimateSummary(o.laborEstimate, o.labor);
   if (o.orderMetals?.length) account += orderMetalsTable(o.orderMetals);
-  const ownIssued = S.ledger.filter((x)=>x.ref===o.code && x.to==="process" && x.owner==="taller").reduce((v,x)=>v+x.mg,0);
+  const ownIssued = o.allocations.filter(x=>x.owner==="taller").reduce((v,x)=>v+x.mg,0);
   account += ownIssued
     ? notice("Salida de metal propio registrada", `Se registró el envío de ${weight(ownIssued)} de ${o.metal}, ley ${number(o.purity)}, a producción. Este movimiento de gramos se registra aparte del cobro al cliente.`, "blue")
     : notice("Sin salida de metal propio registrada", "El presupuesto no retira gramos de tu inventario. Si usarás metal del taller, registra su peso en Asignar a mesa.", "blue");
@@ -1367,7 +1374,7 @@ function orderDetail(o) {
           "Piedras e insumos utilizados",
           "Consumos descontados de inventario.",
           o.materialUsage
-            .map((x) => row(x.name, E(quantity(x.quantity) + " " + x.unit)))
+            .map((x) => row(x.name, E(quantity(x.quantity) + " " + x.unit) + reversalBadge(x)))
             .join(""),
         )
       : "") +
@@ -1532,7 +1539,7 @@ function goldPage() {
             x.owner === "taller"
               ? "Taller"
               : badge(find("orders", x.owner)?.code || "Cliente", "blue"),
-            button("Detalle", "movement-detail", "", "small", x.id),
+            button("Detalle", "movement-detail", "", "small", x.id) + (x.reversedAt ? reversalBadge(x) : ["TRASLADO","CONCILIACIÓN"].includes(x.ref) ? reversalButton("ledger",x.id) : ""),
           ]),
         )
         .join(""),
@@ -1608,7 +1615,7 @@ function smithsPage() {
             lost = liquidated.reduce((v, o) => v + o.returned.lossMg, 0),
             pending = liquidated
               .filter(
-                (o) => !S.settlements.some((x) => x.orderIds.includes(o.id)),
+                (o) => !S.settlements.some((x) => !x.reversedAt && x.orderIds.includes(o.id)),
               )
               .reduce((v, o) => v + o.smithFee, 0);
           return card(
@@ -1651,7 +1658,7 @@ function smithsPage() {
             x.orderIds.map((id) => E(find("orders", id)?.code)).join(", "),
             cop(x.amount),
             E(x.method === "cash" ? "Efectivo" : "Transferencia") +
-              `<small>${E(x.reference)}</small>`,
+              `<small>${E(x.reference)}</small>` + (x.reversedAt ? reversalBadge(x) : reversalButton("settlement",x.id)),
           ]),
         )
         .join(""),
@@ -1693,7 +1700,7 @@ function paymentsPage() {
               : "—",
             cop(x.change),
             cop(x.applied),
-            button("Comprobante", "print-payment", "print", "small", x.id),
+            button("Comprobante", "print-payment", "print", "small", x.id) + (!x.voidedAt ? reversalButton("payment",x.id) : ""),
           ]),
         )
         .join(""),
@@ -1717,7 +1724,7 @@ function cashPage() {
           "Movimientos de efectivo",
           shift.code,
           table(
-            ["Hora", "Concepto", "Importe"],
+            ["Hora", "Concepto", "Importe", "Estado / acción"],
             S.cashEntries
               .filter((x) => x.shiftId === shift.id)
               .reverse()
@@ -1726,6 +1733,7 @@ function cashPage() {
                   dt(x.at),
                   E(measurementNote(x.note)),
                   `<span style="color:${x.amount < 0 ? "var(--red)" : "var(--green)"}">${x.amount < 0 ? "−" : "+"}${cop(Math.abs(x.amount))}</span>`,
+                  x.reversedAt ? reversalBadge(x) : x.ref === "CAJA" ? reversalButton("cash",x.id) : "",
                 ]),
               )
               .join(""),
@@ -1800,19 +1808,19 @@ function purchasesPage() {
       [...S.purchases]
         .reverse()
         .map((x) => {
-          const pending =
+          const pending = x.reversedAt ? 0 :
             x.total -
             S.supplierPayments
-              .filter((p) => p.purchaseId === x.id)
+              .filter((p) => p.purchaseId === x.id && !p.reversedAt)
               .reduce((v, p) => v + p.amount, 0);
           return tr([
-            `<strong>${E(x.code)}</strong><small>${E(x.document)} · ${dt(x.at)}</small>`,
+            `<strong>${E(x.code)}</strong>${reversalBadge(x)}<small>${E(x.document)} · ${dt(x.at)}</small>`,
             E(find("suppliers", x.supplierId)?.name),
             E(x.metal) + " · " + number(x.purity),
             weight(x.mg),
             cop(x.total),
             `<span style="color:var(--debt)">${cop(pending)}</span>`,
-            pending
+            x.reversedAt ? reversalBadge(x) : ((pending
               ? allowed(
                   "purchases",
                   "Pagar",
@@ -1821,7 +1829,7 @@ function purchasesPage() {
                   "small",
                   x.id,
                 )
-              : badge("Pagada"),
+              : badge("Pagada")) + reversalButton("purchase",x.id)),
           ]);
         })
         .join(""),
@@ -1829,7 +1837,7 @@ function purchasesPage() {
       "Pagos realizados",
       "Soportes ligados a cada compra.",
       table(
-        ["Fecha", "Compra", "Valor", "Soporte"],
+        ["Fecha", "Compra", "Valor", "Soporte", "Estado / acción"],
         [...S.supplierPayments]
           .reverse()
           .map((x) =>
@@ -1838,6 +1846,7 @@ function purchasesPage() {
               E(find("purchases", x.purchaseId)?.code),
               cop(x.amount),
               E(x.reference),
+              x.reversedAt ? reversalBadge(x) : reversalButton("supplierPayment",x.id),
             ]),
           )
           .join(""),
@@ -1860,7 +1869,7 @@ function materialsPage() {
       ),
     ) +
     `<section class="card table-card"><div class="card-head"><div><h2>Inventario de insumos</h2><p>El metal precioso se controla en el Libro de metales.</p></div></div>${table(["Insumo", "Existencia", "Mínimo", "Costo unitario", "Estado", ""], S.materials.map((x) => tr([`<strong>${E(x.name)}</strong>`, E(quantity(x.quantity) + " " + x.unit), E(quantity(x.min) + " " + x.unit), cop(x.unitCost), badge(x.quantity <= x.min ? "Existencia baja" : "Disponible", x.quantity <= x.min ? "amber" : ""), allowed("inventory", "Registrar entrada", "restock-material", "plus", "small", x.id)])).join(""), "Crea los materiales que utilizas; luego descuéntalos desde la orden de trabajo.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Movimientos de insumos</h2></div>${table(
-      ["Fecha", "Insumo", "Cantidad", "Referencia", "Responsable"],
+      ["Fecha", "Insumo", "Cantidad", "Referencia", "Responsable", "Estado / acción"],
       [...S.materialMoves]
         .reverse()
         .slice(0, 300)
@@ -1875,6 +1884,7 @@ function materialsPage() {
             ),
             E(measurementNote(x.note)),
             E(x.actor),
+            x.reversedAt ? reversalBadge(x) : !x.reversalId ? reversalButton("material",x.id) : "",
           ]),
         )
         .join(""),
@@ -1893,7 +1903,7 @@ function stockPage() {
       "Cada transferencia descuenta las piezas y el metal de este taller. Descarga el soporte CSV para ingresarlo en el sistema receptor.",
       "blue",
     ) +
-    `<section class="card table-card"><div class="card-head"><h2>Existencias de piezas</h2></div>${table(["Código / pieza", "Origen", "Unidades", "Peso disponible", "Costo total lote", "Precio sugerido unit.", ""], S.stock.map((x) => tr([`<strong>${E(x.sku)}</strong><small>${E(x.description)}</small>`, E(find("orders", x.orderId)?.code), number(x.available) + " / " + number(x.quantity), weight(x.remainingMg ?? x.mg), cop(x.cost), cop(x.price), x.available ? allowed("inventory", "Transferir", "transfer-stock", "arrow", "small", x.id) : badge("Transferida", "gray")])).join(""), "Para ingresar piezas, crea una orden de producción propia y completa su control de calidad.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Transferencias registradas</h2></div>${table(
+    `<section class="card table-card"><div class="card-head"><h2>Existencias de piezas</h2></div>${table(["Código / pieza", "Origen", "Unidades", "Peso disponible", "Costo total lote", "Precio sugerido unit.", ""], S.stock.map((x) => tr([`<strong>${E(x.sku)}</strong><small>${E(x.description)}</small>`, E(find("orders", x.orderId)?.code), number(x.available) + " / " + number(x.quantity), weight(x.remainingMg ?? x.mg), cop(x.cost), cop(x.price), x.reversedAt ? reversalBadge(x) : (x.available ? allowed("inventory", "Transferir", "transfer-stock", "arrow", "small", x.id) : badge("Transferida", "gray")) + reversalButton("stockReceive",x.id)])).join(""), "Para ingresar piezas, crea una orden de producción propia y completa su control de calidad.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Transferencias registradas</h2></div>${table(
       ["Referencia", "Fecha", "Pieza", "Unidades", "Peso", "Destino", ""],
       S.stock
         .flatMap((x) =>
@@ -1905,7 +1915,7 @@ function stockPage() {
               t.quantity,
               weight(t.mg),
               E(t.destination),
-              button("CSV", "export-transfer", "download", "small", t.id),
+              button("CSV", "export-transfer", "download", "small", t.id) + (t.reversedAt ? reversalBadge(t) : reversalButton("stockTransfer",t.id)),
             ]),
           ),
         )
@@ -1986,7 +1996,7 @@ function estimatedCost(o) {
     used = i >= 0 ? o.allocations[i].mg - (o.returned?.scraps[i] || 0) : 0;
   return (
     Math.round((used * o.purity * (o.rateSnapshot || 0)) / 1e6) +
-    o.materialUsage.reduce((v, x) => v + x.cost, 0) +
+    o.materialUsage.filter(x=>!x.reversedAt).reduce((v, x) => v + x.cost, 0) +
     o.smithFee
   );
 }
@@ -2020,6 +2030,81 @@ function usersPage() {
         .join(""),
     )}<p class="muted section-gap" style="font-size:11px">Los retornos con merma crítica, las diferencias de caja y los ajustes de existencias requieren un administrador.</p></section>`
   );
+}
+const reversalTypes = [
+  ["purchase","Compra de metal"],["supplierPayment","Pago a proveedor"],
+  ["sale","Entrega / venta al cliente"],["payment","Cobro o devolución al cliente"],
+  ["order","Orden sin producción ni abonos"],["cash","Ingreso / gasto manual de caja"],
+  ["ledger","Traslado / ajuste de metal"],["material","Entrada / consumo de insumos"],
+  ["stockTransfer","Transferencia de piezas"],["stockReceive","Ingreso de piezas terminadas"],
+  ["settlement","Pago al orfebre"],
+  ["assignment","Asignación a mesa sin actividad posterior"],["quality","Aprobación de calidad"],
+];
+const reversalButton = (type,id) => allowed("adjust","Reversar","reverse-operation","refresh","small danger",type+"|"+id);
+const reversalBadge = (x) => x.reversedAt ? badge("Reversada", "red") : "";
+function reversalCandidates(type) {
+  let rows=[];
+  if(type==="purchase")rows=S.purchases.filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.document+" · "+cop(x.total)]);
+  if(type==="supplierPayment")rows=S.supplierPayments.filter(x=>!x.reversedAt).map(x=>[x.id,(find("purchases",x.purchaseId)?.code||"")+" · "+cop(x.amount)+" · "+x.reference]);
+  if(type==="sale")rows=S.orders.filter(x=>x.status==="delivered"&&x.invoice&&x.type!=="Producción propia").map(x=>[x.id,x.invoice+" · "+x.code+" · "+client(x)]);
+  if(type==="payment")rows=S.payments.filter(x=>!x.voidedAt&&!x.reversedAt).map(x=>[x.id,x.code+" · "+cop(x.applied)+" · "+(find("orders",x.orderId)?.code||"")]);
+  if(type==="order")rows=S.orders.filter(x=>x.status==="received").map(x=>[x.id,x.code+" · "+x.description]);
+  if(type==="cash")rows=S.cashEntries.filter(x=>x.ref==="CAJA"&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.note+" · "+cop(x.amount)]);
+  if(type==="ledger")rows=S.ledger.filter(x=>["TRASLADO","CONCILIACIÓN"].includes(x.ref)&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.ref+" · "+x.metal+" · "+weight(x.mg)]);
+  if(type==="material")rows=S.materialMoves.filter(x=>!x.reversedAt&&!x.reversalId).map(x=>[x.id,dt(x.at)+" · "+(find("materials",x.materialId)?.name||"")+" · "+quantity(x.quantity)+" · "+x.note]);
+  if(type==="stockTransfer")rows=S.stock.flatMap(x=>x.transfers.filter(t=>!t.reversedAt).map(t=>[t.id,t.code+" · "+x.sku+" · "+t.destination]));
+  if(type==="stockReceive")rows=S.stock.filter(x=>!x.reversedAt).map(x=>[x.id,x.sku+" · "+x.description]);
+  if(type==="settlement")rows=S.settlements.filter(x=>!x.reversedAt).map(x=>[x.id,(find("smiths",x.smithId)?.name||"")+" · "+cop(x.amount)+" · "+x.reference]);
+  if(type==="assignment")rows=S.orders.filter(x=>x.status==="in_progress").map(x=>[x.id,x.code+" · "+x.description]);
+  if(type==="quality")rows=S.orders.filter(x=>x.status==="ready").map(x=>[x.id,x.code+" · "+x.description]);
+  return rows.reverse();
+}
+function reversalsPage() {
+  return head("CORREGIR CON TRAZABILIDAD","Reversiones","Revisa la operación, su efecto y el soporte antes de confirmar.",button("Reversar operación","reverse-operation","refresh","primary"))+
+    notice("Se conserva el movimiento original","Las reversiones registran movimientos contrarios. Los cierres de caja anteriores no se reabren; las devoluciones en efectivo se registran en el turno abierto.","blue")+
+    `<div class="grid two section-gap">${card("Compras y pagos","",'<p>Primero revierte los pagos de una compra y después la compra, si el metal sigue disponible. En pagos bancarios registra el soporte real de la devolución.</p>')}${card("Ventas y devoluciones","",'<p>Reversar una entrega devuelve la pieza y los sobrantes registrados y reabre la orden. Los cobros se conservan: revierte o devuelve los pagos por separado.</p>')}</div>`+
+    `<div class="section-gap">${notice("Operaciones que requieren revisión","Una fundición, una merma física, la producción ya terminada y los cierres de caja no se deshacen automáticamente. El sistema bloquea reversiones sin existencias, duplicadas o con operaciones dependientes.","amber")}</div>`+
+    card("Historial de reversiones","Se conserva también en las copias de seguridad y la auditoría.",table(["Fecha / responsable","Operación","Resultado","Motivo / soporte"],[...(S.reversals||[])].reverse().map(x=>tr([dt(x.at)+"<small>"+E(x.actor)+"</small>",E(reversalTypes.find(t=>t[0]===x.type)?.[1]||x.type)+"<small>"+E(reversalReference(x))+"</small>",E(x.summary),E(x.reason)+"<small>"+E(x.reference)+"</small>"])).join("")));
+}
+function reversalReference(r) {
+  const collections={purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
+  if(r.type==="stockTransfer")return S.stock.flatMap(x=>x.transfers).find(x=>x.id===r.targetId)?.code||r.targetId;
+  const source=S[collections[r.type]]?.find(x=>x.id===r.targetId);
+  return r.original?.invoice||source?.code||source?.sku||source?.reference||source?.note||r.targetId;
+}
+function reverseOperationModal(type="purchase",targetId="") {
+  const rows=reversalCandidates(type);
+  let prepared=null;
+  modal("Revisar reversión",notice("Verifica la devolución real","Esta pantalla registra la corrección; no mueve dinero en tu banco ni devuelve físicamente una pieza. Confirma solo después de comprobar lo sucedido.","amber")+
+    `<div class="form-grid section-gap">${select("type","Tipo de operación",reversalTypes,type)}${select("id","Registro original",rows.length?rows:[["","No hay registros disponibles"]],targetId||rows[0]?.[0]||"")}<div id="reverse-metal-source" class="span-2">${select("metalSource","Origen del metal a devolver al cliente",[["payment","Metal recibido como pago en caja"],["own","Metal propio en bodega"]],"payment")}</div><div class="span-2">${field("reason","Motivo de la reversión","text","",'required maxlength="1000"')}</div><div class="span-2">${field("reference","Soporte de devolución (obligatorio para banco)","text","",'maxlength="200"')}</div><label class="check span-2"><input type="checkbox" name="confirmed" required>He verificado el registro y la devolución de dinero, piezas o material, o que se trata de un registro erróneo sin movimiento físico.</label><div id="reversal-preview" class="span-2"></div></div>`,async(b,form,key)=>{
+      const payload={...b,confirmed:true},signature=JSON.stringify(payload);
+      if(!prepared||prepared.signature!==signature) {
+        const preview=await api("/api/reversal-preview",{method:"POST",body:JSON.stringify(payload)});
+        prepared={signature,preview};
+        $("#reversal-preview",form).innerHTML=card("Efecto de la reversión","Todavía no se ha guardado.",`<p>${E(preview.summary)}</p>${row("Cambio de efectivo en el turno abierto",cop(preview.cashDelta))}${preview.bankDelta ? row("Movimiento bancario respaldado",cop(preview.bankDelta)) : ""}${preview.movements.map(x=>row((ACC[x.from]||x.from)+" → "+(ACC[x.to]||x.to),weight(x.mg)+" · "+E(x.metal)+" · ley "+number(x.purity))).join("")}${preview.materials.map(x=>row("Existencia resultante: "+x.name,quantity(x.quantity)+" "+E(x.unit))).join("")}${preview.stock.map(x=>row("Unidades disponibles: "+x.sku,number(x.available))).join("")}`);
+        $('button[type="submit"]',form).textContent="Confirmar reversión";
+        return false;
+      }
+      try {return await mutate("operation.reverse",payload,key,prepared.preview.revision);}
+      catch(e){prepared=null;$("#reversal-preview",form).replaceChildren();$('button[type="submit"]',form).textContent="Revisar reversión";throw e;}
+    },"Revisar reversión");
+  const form=$("#modal-form");
+  function updateSource(){
+    const payment=S.payments.find(x=>x.id===form.elements.id.value);
+    $("#reverse-metal-source",form).hidden=form.elements.type.value!=="payment"||!payment?.goldMg;
+  }
+  updateSource();
+  form.addEventListener("change",e=>{
+    if(e.target.name==="type"){
+      const candidates=reversalCandidates(form.elements.type.value);
+      form.elements.id.innerHTML=(candidates.length?candidates:[["","No hay registros disponibles"]]).map(x=>option(x[0],x[1],candidates[0]?.[0])).join("");
+    }
+    updateSource();
+  });
+  form.addEventListener("input",()=>{
+    prepared=null;$("#reversal-preview",form).replaceChildren();
+    $('button[type="submit"]',form).textContent="Revisar reversión";
+  });
 }
 function categoriesPage() {
   return head("EL ORO DE TU TALLER", "Categorías de oro", "Define los tipos de oro y su ley en milésimas para usarlos en las operaciones del taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
@@ -2117,6 +2202,7 @@ function assistantPage() {
 }
 function actionLabel(a) {
   const labels = {
+    "operation.reverse": "Operación reversada",
     "category.delete": "Categoría eliminada",
     "category.save": "Categoría guardada",
     "client.save": "Cliente guardado",
@@ -3015,6 +3101,7 @@ function exportData(type, id) {
             "Precio unitario sugerido COP",
             "Destino",
             "Entrega",
+            "Estado",
           ],
           [
             [
@@ -3030,6 +3117,7 @@ function exportData(type, id) {
               s.price,
               t.destination,
               t.actor,
+              t.reversedAt ? "Reversada" : "Vigente",
             ],
           ],
         );
@@ -3123,6 +3211,11 @@ async function handleAction(action, id, el) {
     case "new-supplier":
       supplierModal();
       break;
+    case "reverse-operation": {
+      const [type,target]=id ? id.split("|") : ["purchase",""];
+      reverseOperationModal(type,target);
+      break;
+    }
     case "new-category":
       categoryModal();
       break;
@@ -3440,7 +3533,7 @@ async function handleAction(action, id, el) {
           (o) =>
             o.smithId === id &&
             o.returned &&
-            !S.settlements.some((x) => x.orderIds.includes(o.id)),
+            !S.settlements.some((x) => !x.reversedAt && x.orderIds.includes(o.id)),
         );
       simpleModal(
         "Liquidar honorarios · " + s.name,

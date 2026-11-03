@@ -12,6 +12,19 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: reversión previsualizada sin escritura y compensación persistente tras reiniciar",async(t)=>{
+  const f=await fixture(t);
+  assert.equal((await f.request("/api/setup",{workshop:"Reversiones nube",name:"Admin",username:"admin",password:"1234",setupKey})).status,201);
+  const supplier=(await f.act("supplier.save",{name:"Proveedor nube"})).body.result;
+  const purchase=(await f.act("purchase.create",{supplierId:supplier.id,document:"NUBE-001",metal:"oro",purity:750,weight:2,rate:100000,dueDate:"2026-12-01"})).body.result;
+  const before=await f.state(),payload={type:"purchase",id:purchase.id,reason:"Ingreso erróneo verificado",confirmed:true};
+  const preview=await f.request("/api/reversal-preview",payload);assert.equal(preview.status,200);
+  assert.equal(preview.body.movements.length,1);assert.deepEqual(await f.state(),before);
+  assert.equal((await f.act("operation.reverse",payload)).status,200);
+  const after=await f.state();assert.equal(after.reversals.length,1);assert.ok(after.purchases[0].reversedAt);
+  await f.open();assert.deepEqual(await f.state(),after);
+});
+
 async function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aurea-cloud-"));
   const emulator = await createTursoEmulator(

@@ -1,0 +1,69 @@
+"use strict";
+const {chromium}=require("playwright"),{createApp}=require("../server.cjs");
+const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),assert=require("node:assert/strict");
+(async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"aurea-reversas-ui-")),app=createApp({dataDir:dir});
+  await new Promise(r=>app.server.listen(0,"127.0.0.1",r));const base="http://127.0.0.1:"+app.server.address().port;let browser;
+  try {
+    browser=await chromium.launch({headless:true,channel:"msedge"});
+    const context=await browser.newContext({viewport:{width:1440,height:1000},locale:"es-CO"});
+    await context.request.post(base+"/api/setup",{data:{workshop:"Taller pruebas",name:"Admin",username:"admin",password:"1234"}});
+    const state=async()=>(await (await context.request.get(base+"/api/state")).json()).state;
+    async function act(action,data){const current=await state();const r=await context.request.post(base+"/api/action",{headers:{"If-Match":String(current.revision),"Idempotency-Key":crypto.randomUUID()},data:{action,data}});assert.equal(r.status(),200,await r.text());return (await r.json()).result;}
+    const supplier=await act("supplier.save",{name:"Proveedor"});
+    const purchase=await act("purchase.create",{supplierId:supplier.id,document:"F-001",metal:"oro",purity:750,weight:2,rate:100000,dueDate:"2026-12-01"});
+    const page=await context.newPage(),errors=[];page.on("pageerror",e=>errors.push(e.message));
+    await page.goto(base+"/#purchases");
+    await page.locator(`[data-action="reverse-operation"][data-id="purchase|${purchase.id}"]`).click();
+    const modal=page.locator("#modal-form"),submit=modal.locator('button[type="submit"]');
+    await modal.locator('[name="reason"]').fill("Compra ingresada por error");
+    await modal.locator('[name="confirmed"]').check();
+    const before=await state();await submit.click();
+    await modal.locator('#reversal-preview').getByText("Efecto de la reversión",{exact:true}).waitFor();
+    assert.deepEqual(await state(),before,"La revisión no modifica nada");
+    for(const width of [1440,768,390,320]){
+      await page.setViewportSize({width,height:950});
+      assert.equal(await page.locator('#dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false,"Modal de reversión "+width);
+    }
+    await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});
+    let saved=await state();assert.ok(saved.purchases[0].reversedAt);assert.equal(saved.reversals.length,1);
+    await page.setViewportSize({width:1440,height:1000});
+    await page.goto(base+"/#reversals");await page.locator('#page h1').waitFor();
+    assert.match(await page.locator('#page').innerText(),/Compra ingresada por error/);
+    for(const width of [390,320]){await page.setViewportSize({width,height:950});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Historial de reversión "+width);}
+    await page.setViewportSize({width:1440,height:1000});
+    await act("shift.open",{opening:100000});await act("cash.entry",{type:"expense",amount:20000,note:"Gasto erróneo"});
+    await page.reload();await page.locator('#page h1').waitFor();
+    await page.locator('#page [data-action="reverse-operation"]').first().click();
+    await modal.locator('[name="type"]').selectOption("cash");
+    await modal.locator('[name="reason"]').fill("Corregir gasto");await modal.locator('[name="confirmed"]').check();
+    await submit.click();await modal.locator('#reversal-preview h2').waitFor();
+    await modal.locator('[name="reason"]').fill("Corregir gasto y soporte");
+    assert.equal(await modal.locator('#reversal-preview h2').count(),0);
+    await submit.click();await modal.locator('#reversal-preview h2').waitFor();
+    await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});
+    assert.equal((await state()).reversals.length,2);
+    const c=await act("client.save",{name:"Cliente venta"}),smith=await act("smith.save",{name:"Orfebre",bench:"Mesa"});
+    const o=await act("order.create",{clientId:c.id,type:"Reparación",description:"Cadena",condition:"Recibida",metal:"oro",purity:750,receivedWeight:2,dueDate:"2026-12-01",labor:20000,materialPrice:0,goldPrice:0,taxPercent:0});
+    await act("order.assign",{id:o.id,smithId:smith.id,customerWeight:2,ownWeight:0});
+    await act("order.return",{id:o.id,pieceWeight:1.95,scrapWeight:0.03,reason:"Verificado"});
+    await act("order.quality",{id:o.id,checks:[true,true,true]});
+    await act("payment.create",{orderId:o.id,cash:20000});await act("order.deliver",{id:o.id,acceptance:"Cliente"});
+    await page.goto(base+"/#orders/"+o.id);await page.reload();
+    await page.locator(`[data-action="reverse-operation"][data-id="sale|${o.id}"]`).click();
+    await modal.locator('[name="reason"]').fill("Cliente devolvió pieza y sobrantes");await modal.locator('[name="confirmed"]').check();
+    await submit.click();await modal.locator('#reversal-preview h2').waitFor();
+    assert.match(await modal.locator('#reversal-preview').innerText(),/Los pagos se conservan/);
+    await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});
+    saved=await state();assert.equal(saved.orders[0].status,"ready");assert.equal(saved.orders[0].invoice,null);assert.equal(saved.payments[0].voidedAt,undefined);
+    await page.goto(base+"/#reports");assert.match(await page.locator('.kpis').first().innerText(),/Ventas entregadas[\s\S]*0,00/);
+    await act("user.create",{name:"Consulta",username:"consulta",password:"1234",role:"consulta"});
+    const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"consulta",password:"1234"}});
+    const restrictedPage=await restricted.newPage();await restrictedPage.goto(base+"/#reversals");await restrictedPage.locator('#page').waitFor();
+    assert.equal(await restrictedPage.locator('[data-nav="reversals"]').count(),0);
+    assert.match(await restrictedPage.locator('#page').innerText(),/Acceso restringido/);
+    assert.equal((await restricted.request.post(base+"/api/reversal-preview",{data:{}})).status(),403);
+    assert.deepEqual(errors,[]);
+    console.log("Reversiones UI: vista previa sin cambios, doble confirmación, correcciones, compras, caja, ventas, reportes, roles y móvil correctos.");
+  } finally {if(browser)await browser.close();await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -369,6 +369,10 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
+    case "operation.reverse": {
+      permit(a,"adjust");
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,paid,total,timeline,execute,materialQuantity});
+    }
     case "category.delete": {
       permit(a, "settings");
       const categories = s.settings.goldCategories || defaultGoldCategories();
@@ -565,6 +569,7 @@ function execute(s, action, b, a) {
       );
       const source = b.source || "own";
       assert(["own", "payment", "melt"].includes(source), "Origen no válido.");
+      const assignmentStart = s.ledger.length;
       move(
         s,
         a,
@@ -593,6 +598,7 @@ function execute(s, action, b, a) {
         { owner: o.id, mg: customer },
         { owner: "taller", mg: own },
       ].filter((x) => x.mg);
+      o.assignmentLedgerIds = s.ledger.slice(assignmentStart).map(x=>x.id);
       o.smithId = smith.id;
       o.smithFee = money(b.smithFee ?? 0, "Honorarios de orfebre");
       o.status = "in_progress";
@@ -761,6 +767,7 @@ function execute(s, action, b, a) {
         due(s, o) === 0,
         "Existe saldo pendiente. Registra el cobro antes de entregar.",
       );
+      const deliveryStart = s.ledger.length;
       for (const x of balances(s).filter(
         (x) => x.owner === o.id && ["custody", "scrap"].includes(x.account),
       ))
@@ -790,6 +797,7 @@ function execute(s, action, b, a) {
           o.code,
           "Metal propio vendido en pieza",
         );
+      o.deliveryLedgerIds = s.ledger.slice(deliveryStart).map(x=>x.id);
       o.status = "delivered";
       o.deliveredAt = now();
       o.invoice = seq(s, "sale", "V");
@@ -809,7 +817,7 @@ function execute(s, action, b, a) {
         "Solo se anulan órdenes sin producción ni pagos.",
       );
       assert(
-        !o.materialUsage.length,
+        !o.materialUsage.some(x=>!x.reversedAt),
         "La orden ya tiene insumos consumidos y actividad de producción; revisa sus consumos antes de anular.",
       );
       const reason = str(b.reason, "Motivo de anulación", 1000);
@@ -1309,7 +1317,7 @@ function execute(s, action, b, a) {
       };
       assert(
         !s.purchases.some(
-          (y) => y.supplierId === x.supplierId && y.document === x.document,
+          (y) => !y.reversedAt && y.supplierId === x.supplierId && y.document === x.document,
         ),
         "Este documento de compra ya fue registrado.",
       );
@@ -1330,11 +1338,12 @@ function execute(s, action, b, a) {
     }
     case "supplier.pay": {
       permit(a, "purchases");
+      assert(!get(s,"purchases",b.id).reversedAt,"La compra está reversada.");
       const p = get(s, "purchases", b.id),
         pending =
           p.total -
           s.supplierPayments
-            .filter((x) => x.purchaseId === p.id)
+            .filter((x) => x.purchaseId === p.id && !x.reversedAt)
             .reduce((v, x) => v + x.amount, 0),
         amount = money(b.amount, "Pago a proveedor");
       assert(
@@ -1444,6 +1453,7 @@ function execute(s, action, b, a) {
       permit(a, "inventory");
       const x = get(s, "materials", b.id),
         qty = materialQuantity(b.quantity, "Cantidad", 0.001);
+      const previousUnitCost = x.unitCost;
       x.quantity = materialQuantity(
         Number((x.quantity + qty).toFixed(6)),
         "Existencia resultante",
@@ -1455,6 +1465,8 @@ function execute(s, action, b, a) {
         actor: a.name,
         materialId: x.id,
         quantity: qty,
+        previousUnitCost,
+        unitCostAfter: x.unitCost,
         note: str(b.note, "Soporte de entrada", 1000),
       });
       return x;
@@ -1530,6 +1542,7 @@ function execute(s, action, b, a) {
     case "stock.transfer": {
       permit(a, "inventory");
       const x = get(s, "stock", b.id);
+      assert(!x.reversedAt,"El ingreso de este lote está reversado.");
       const quantity = num(b.quantity, "Unidades", 1, x.available);
       assert(Number.isInteger(quantity), "Unidades enteras.");
       const mg = grams(b.weight, "Peso de las piezas a transferir");
@@ -1586,7 +1599,7 @@ function execute(s, action, b, a) {
         (o) =>
           o.smithId === smith.id &&
           o.returned &&
-          !s.settlements.some((x) => x.orderIds.includes(o.id)),
+          !s.settlements.some((x) => !x.reversedAt && x.orderIds.includes(o.id)),
       );
       assert(orders.length, "No hay honorarios pendientes de liquidación.");
       const amount = orders.reduce((v, o) => v + o.smithFee, 0);
@@ -1689,6 +1702,14 @@ function validateState(s) {
       purity(x.purity);
       categoryIds.add(x.id);
       names.add(name);
+    }
+  }
+  if(s.reversals!==undefined) {
+    assert(Array.isArray(s.reversals),"Historial de reversiones inválido.");
+    const keys=new Set();
+    for(const r of s.reversals) {
+      assert(r&&typeof r.id==="string"&&!keys.has(r.id)&&typeof r.type==="string"&&typeof r.targetId==="string"&&typeof r.actor==="string"&&typeof r.summary==="string"&&Number.isFinite(Date.parse(r.at)),"Registro de reversión inválido.");
+      str(r.reason,"Motivo de reversión",1000);keys.add(r.id);
     }
   }
   const ids = (collection) => new Set(s[collection].map((x) => x.id));
@@ -1860,7 +1881,7 @@ function validateState(s) {
     money(p.total, "Total de compra");
     assert(
       s.supplierPayments
-        .filter((x) => x.purchaseId === p.id)
+        .filter((x) => x.purchaseId === p.id && !x.reversedAt)
         .reduce((v, x) => v + x.amount, 0) <= p.total,
       "Pagos superiores a la compra.",
     );
