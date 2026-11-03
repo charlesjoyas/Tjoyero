@@ -14,6 +14,10 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     const page=await context.newPage(),errors=[];page.on("pageerror",e=>errors.push(e.message));
     await page.goto(base+"/#receive");
     const main=page.locator("#receive-form"),modal=page.locator("#modal-form");
+    assert.match(await main.innerText(),/1\. Lo que trae el cliente/);
+    assert.match(await main.innerText(),/2\. Lo que le cobras al cliente/);
+    assert.equal(await main.locator('.card').first().locator('[data-action="new-order-metal"]').count(),0);
+    assert.match(await main.innerText(),/Añadir un cobro al presupuesto no descuenta gramos/);
     await main.locator('[name="description"]').fill("Trabajo con metal vendido");
     await main.locator('[name="labor"]').fill("50000");
     await main.locator('[name="goldPrice"]').fill("10000");
@@ -61,6 +65,7 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     assert.deepEqual(saved.settings,before.settings);
     assert.equal(saved.ledger.length,0,"El detalle comercial no genera inventario");
     assert.match(await page.locator('#page').innerText(),/Oro 18k para esta orden/);
+    assert.match(await page.locator('#page').innerText(),/Sin salida de metal propio registrada/);
     for(const width of [390,320]) {
       await page.setViewportSize({width,height:950});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,"Detalle de orden en móvil");
@@ -81,6 +86,17 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     saved=await state();assert.equal(saved.orders[0].orderMetals.length,1);
     assert.equal(saved.orders[0].orderMetals[0].price,30000);
     assert.equal(saved.orders[0].goldPrice,40000);
+    async function action(action,data) {
+      const current=await state();
+      const r=await context.request.post(base+"/api/action",{headers:{"If-Match":String(current.revision),"Idempotency-Key":crypto.randomUUID()},data:{action,data}});
+      assert.equal(r.status(),200,await r.text());return (await r.json()).result;
+    }
+    const smith=await action("smith.save",{name:"Orfebre",bench:"Mesa"});
+    await action("inventory.adjust",{account:"own",metal:"oro",purity:750,weight:5,reason:"Existencia de prueba"});
+    await action("order.assign",{id:saved.orders[0].id,smithId:smith.id,ownWeight:2,customerWeight:0,source:"own",smithFee:0});
+    await page.reload();await page.locator('h1').filter({hasText:"T-0001"}).waitFor();
+    assert.match(await page.locator('#page').innerText(),/Salida de metal propio registrada/);
+    assert.match(await page.locator('#page').innerText(),/envío de 2,000 g/);
     await page.setViewportSize({width:1440,height:1000});
     await page.goto(base+"/#receive");
     assert.equal(await main.locator('[name="orderMetals"]').inputValue(),"[]");
