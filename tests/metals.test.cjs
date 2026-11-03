@@ -3,24 +3,39 @@ const {test}=require("node:test");
 const assert=require("node:assert/strict");
 const D=require("../domain.cjs");
 const admin={role:"admin",name:"Administrador"};
-test("Metales: catálogo compatible, nombres únicos, permisos y tarifas conservadas",()=>{
-  const s=D.initialState();delete s.settings.metals;D.validateState(s);
-  assert.throws(()=>D.execute(s,"metal.save",{name:"Paladio",rate:200000},{role:"recepcion"}),/rol/);
-  const m=D.execute(s,"metal.save",{name:"Paladio",rate:200000},admin);
-  assert.equal(m.id,"paladio");assert.equal(s.settings.rate.paladio,200000);
-  for(const name of ["PALADIO"," paladio ","constructor","__proto__","<script>"])
-    assert.throws(()=>D.execute(s,"metal.save",{name,rate:200000},admin));
-  assert.throws(()=>D.execute(s,"metal.save",{name:"Cobre",rate:1.5},admin),/enteros/);
-  D.execute(s,"metal.save",{id:m.id,name:m.name,rate:220000},admin);
-  D.execute(s,"settings.save",{name:"Taller",goldRate:600000,silverRate:5000,platinumRate:200000,taxPercent:0,lossNormal:2,lossWarning:3.5,tolerance:0.005,printWidth:80,baudRate:9600,reason:"Tarifas generales"},admin);
-  assert.equal(s.settings.rate.paladio,220000,"Guardar configuración conserva las tarifas adicionales");
+test("Detalle de metal por orden: precios totales, aislamiento y validación del presupuesto",()=>{
+  const s=D.initialState(),originalSettings=structuredClone(s.settings);
+  const c=D.execute(s,"client.save",{name:"Cliente"},admin);
+  const data={clientId:c.id,type:"Reparación",description:"Trabajo",condition:"Recibido",metal:"oro",purity:750,receivedWeight:0,dueDate:"2026-12-01",labor:50000,materialPrice:0,goldPrice:40000,taxPercent:19,orderMetals:[{id:"line-1",name:"Oro 18k vendido",price:25000},{id:"line-2",name:"Plata especial",price:5000}]};
+  const o=D.execute(s,"order.create",data,admin);
+  assert.equal(o.goldPrice,40000);assert.equal(o.tax,17100);
+  assert.equal(o.orderMetals[0].name,"Oro 18k vendido");
+  assert.deepEqual(s.settings,originalSettings);assert.equal(s.ledger.length,0);
+  const second=D.execute(s,"order.create",{...data,goldPrice:0,orderMetals:[]},admin);
+  assert.deepEqual(second.orderMetals,[]);
+  for(const orderMetals of [null,{},[{id:"a",name:"",price:1}],[{id:"a",name:"Oro",price:1.5}],[{id:"a",name:"Oro",price:-1}],[{id:"a",name:"Oro",price:1},{id:"a",name:"Plata",price:2}]])
+    assert.throws(()=>D.execute(s,"order.create",{...data,orderMetals},admin));
+  assert.throws(()=>D.execute(s,"order.create",{...data,goldPrice:100},admin),/menor/);
+  assert.throws(()=>D.execute(s,"order.edit",{...data,id:o.id,orderMetals:undefined,goldPrice:100,reason:"Cambio"},admin),/menor/);
   D.validateState(s);
-  const invalid=structuredClone(s);invalid.settings.metals.push({...m});
+  const restored=JSON.parse(JSON.stringify(s));D.validateState(restored);
+  restored.orders[0].orderMetals[0].price=100000;
+  assert.throws(()=>D.validateState(restored),/incompatible/);
+});
+test("Compatibilidad: conserva metales existentes sin permitir nuevas altas globales",()=>{
+  const s=D.initialState();delete s.settings.metals;D.validateState(s);
+  s.settings.metals=[...D.defaultMetals(),{id:"paladio",name:"Paladio"}];
+  s.settings.rate.paladio=220000;
+  assert.throws(()=>D.execute(s,"metal.save",{name:"Cobre",rate:1000},admin),e=>e.status===404);
+  D.execute(s,"settings.save",{name:"Taller",goldRate:600000,silverRate:5000,platinumRate:200000,taxPercent:0,lossNormal:2,lossWarning:3.5,tolerance:0.005,printWidth:80,baudRate:9600,reason:"Tarifas generales"},admin);
+  assert.equal(s.settings.rate.paladio,220000);
+  D.validateState(s);
+  const invalid=structuredClone(s);invalid.settings.metals.push({id:"paladio",name:"Paladio"});
   assert.throws(()=>D.validateState(invalid),/duplicado/);
 });
 test("Paladio: custodia, compra, inventario, cobro y respaldo usan el metal registrado",()=>{
   const s=D.initialState();
-  D.execute(s,"metal.save",{name:"Paladio",rate:200000},admin);
+  s.settings.metals.push({id:"paladio",name:"Paladio"});s.settings.rate.paladio=200000;
   const c=D.execute(s,"client.save",{name:"Cliente"},admin);
   const orderData={clientId:c.id,type:"Reparación",description:"Anillo paladio",condition:"Recibido",metal:"paladio",purity:950,receivedWeight:3,dueDate:"2026-12-01",labor:190000,materialPrice:0,goldPrice:0,taxPercent:0};
   const o=D.execute(s,"order.create",orderData,admin);

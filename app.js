@@ -250,7 +250,7 @@ const metalSelect = (value = "oro", allowCreate = false) => {
     metals().map((x) => [x.id, x.name]),
     value,
   );
-  return allowCreate && can("settings") ? `<div class="field">${control}${button("Añadir metal", "new-metal", "plus", "small")}</div>` : control;
+  return allowCreate && can("orders") ? `<div class="field">${control}${button("Añadir metal", "new-order-metal", "plus", "small")}<small>Solo para esta orden.</small></div>` : control;
 };
 const goldCategories = () => S?.settings?.goldCategories || [];
 const categorySelect = (name) =>
@@ -982,7 +982,7 @@ function receivePage() {
         )) +
     formWrap(
       "receive-form",
-      `<div class="grid two"><section class="card"><div class="card-head"><div><h2>La pieza y su propietario</h2><p>El metal recibido queda en custodia del cliente.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", true)}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2>Acuerdo de trabajo</h2><p>Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}${moneyField("goldPrice", "Metal vendido por el taller · COP")}${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
+      `<div class="grid two"><section class="card"><div class="card-head"><div><h2>La pieza y su propietario</h2><p>El metal recibido queda en custodia del cliente.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", true)}${puritySelect()}<input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2>Acuerdo de trabajo</h2><p>Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}${moneyField("goldPrice", "Total de metal vendido · COP")}${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
       "Registrar orden y abrir detalle",
     )
   );
@@ -1011,6 +1011,55 @@ function quotePreview(form) {
     const estimate = form.elements.laborEstimate.value;
     summary.innerHTML = estimate ? laborEstimateSummary(JSON.parse(estimate), Number(b.labor || 0)) : "";
   }
+  const metalsList = $("#order-metal-list", form);
+  if (metalsList) metalsList.innerHTML = orderMetalsTable(JSON.parse(form.elements.orderMetals.value || "[]"), true);
+}
+function orderMetalsTable(items, editable = false) {
+  if (!items.length) return "";
+  return card("Metales de esta orden", "Precios totales incluidos en el presupuesto de esta orden.", table(["Metal / descripción", "Precio total · COP", ...(editable ? [""] : [])], items.map((x)=>tr([E(x.name), cop(x.price), ...(editable ? [`<div class="actions">${button("Editar","edit-order-metal","edit","small",x.id)}${button("Quitar","remove-order-metal","","small danger",x.id)}</div>`] : [])])).join("")));
+}
+function setOrderMetals(form, items) {
+  const oldItems = JSON.parse(form.elements.orderMetals.value || "[]");
+  const oldTotal = oldItems.reduce((v,x)=>v+Number(x.price),0);
+  const newTotal = items.reduce((v,x)=>v+Number(x.price),0);
+  const currentTotal = numericValue(form.elements.goldPrice);
+  if (currentTotal < oldTotal) throw new Error("Revisa el total de metal vendido antes de modificar el detalle.");
+  const total = currentTotal - oldTotal + newTotal;
+  if (total > 1e12) throw new Error("El total de metales supera el máximo permitido.");
+  form.elements.orderMetals.value = JSON.stringify(items);
+  setNumericValue(form.elements.goldPrice, total);
+  dirty = true;
+  quotePreview(form);
+}
+function orderMetalModal(id) {
+  const form = $("#receive-form");
+  if (!form) return;
+  const items = JSON.parse(form.elements.orderMetals.value || "[]");
+  const item = items.find((x)=>x.id===id);
+  modal(item ? "Editar metal de esta orden" : "Añadir metal a esta orden", `<p class="muted">Escribe el metal o la descripción y su precio total para este trabajo.</p><div class="form-grid section-gap"><div class="span-2">${field("name","Metal / descripción","text",item?.name || "",'required maxlength="120" placeholder="Ej. Oro 18k, plata o el metal acordado"')}</div><div class="span-2">${moneyField("price","Precio total de este metal · COP",item?.price ?? 0)}</div><p class="muted span-2">Se suma una sola vez al total de metal vendido de esta orden. No cambia el catálogo, las tarifas ni el inventario general.</p></div>`, (b)=>{
+    if (!item && items.length >= 50) throw new Error("Puedes detallar hasta 50 metales por orden.");
+    const price = Number(b.price);
+    if (!Number.isSafeInteger(price) || price < 0 || price > 1e12) throw new Error("Precio total del metal inválido.");
+    const next = {id:item?.id || crypto.randomUUID(),name:b.name.trim(),price};
+    setOrderMetals(form,item ? items.map((x)=>x.id===item.id ? next : x) : [...items,next]);
+  }, "Guardar en esta orden");
+}
+function removeOrderMetal(id) {
+  const form = $("#receive-form");
+  const items = JSON.parse(form.elements.orderMetals.value || "[]");
+  setOrderMetals(form,items.filter((x)=>x.id!==id));
+}
+function inlineOrderMetal(x) {
+  return `<section class="span-2" data-order-metal-row="${E(x.id)}"><div class="form-grid">${field("orderMetalName-"+x.id,"Metal / descripción","text",x.name,'required maxlength="120"')}${moneyField("orderMetalPrice-"+x.id,"Precio total · COP",x.price)}<div class="span-2">${button("Quitar metal","remove-inline-metal","","small danger",x.id)}</div></div></section>`;
+}
+function readInlineMetals(form) {
+  return $$("[data-order-metal-row]",form).map((row)=>({id:row.dataset.orderMetalRow,name:$("[name^=orderMetalName-]",row).value.trim(),price:numericValue($("[name^=orderMetalPrice-]",row))}));
+}
+function updateInlineMetalTotal(form) {
+  const total = readInlineMetals(form).reduce((v,x)=>v+x.price,0);
+  const previous = Number(form.dataset.metalTotal || 0);
+  setNumericValue(form.elements.goldPrice, Math.max(0,numericValue(form.elements.goldPrice) - previous + total));
+  form.dataset.metalTotal = String(total);
 }
 function laborEstimateSummary(x, charged, expanded = false) {
   const unit = x.mode === "weight" ? "g" : "horas";
@@ -1208,6 +1257,7 @@ function orderDetail(o) {
     row("Abonos", cop(paid(o))) +
     row("Saldo", cop(due(o)), "debt");
   if (o.laborEstimate) account += laborEstimateSummary(o.laborEstimate, o.labor);
+  if (o.orderMetals?.length) account += orderMetalsTable(o.orderMetals);
   if (o.invoice) account += row("Comprobante de entrega", E(o.invoice));
   account +=
     '<p class="muted section-gap" style="font-size:10px">La venta se reconoce al entregar. El metal del cliente no se cobra como venta.</p>';
@@ -1975,30 +2025,13 @@ function usersPage() {
   );
 }
 function categoriesPage() {
-  return head("LOS METALES DE TU TALLER", "Categorías y metales", "Define los metales, sus tarifas y las categorías de oro que usa tu taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
-    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar o eliminar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), `<div class="actions">${button("Editar", "edit-category", "edit", "small", x.id)}${button("Eliminar", "delete-category", "", "small danger", x.id)}</div>`])).join(""))) +
-    `<div class="section-gap">${card("Metales del taller", "Disponibles en recepción, compras, cobros, producción y libro de metales. Las tarifas son por gramo fino.", table(["Metal", "Tarifa · COP / g fino", ""], metals().map((x) => tr([E(x.name), cop(S.settings.rate[x.id]), button("Editar tarifa", "edit-metal", "edit", "small", x.id)])).join("")), button("Añadir metal", "new-metal", "plus", "primary"))}</div>`;
+  return head("EL ORO DE TU TALLER", "Categorías de oro", "Define los tipos de oro y su ley en milésimas para usarlos en las operaciones del taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
+    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar o eliminar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), `<div class="actions">${button("Editar", "edit-category", "edit", "small", x.id)}${button("Eliminar", "delete-category", "", "small danger", x.id)}</div>`])).join("")));
 }
 function categoryModal(id) {
   const x = goldCategories().find((x) => x.id === id) || {};
   simpleModal(id ? "Editar categoría de oro" : "Nueva categoría de oro", "category.save",
     `<div class="form-grid"><div class="span-2">${field("name", "Nombre de la categoría", "text", x.name || "", 'required maxlength="80" placeholder="Ej. Oro 16k"')}</div>${field("purity", "Ley en milésimas", "number", x.purity ?? 750, 'min="1" max="1000" step="1" required')}${select("active", "Estado", [["true", "Activa"], ["false", "Inactiva"]], String(x.active ?? true))}<p class="muted span-2">Ejemplos: oro 18k = 750; oro 14k = 585. Usa la ley ensayada de tu material. Las categorías inactivas dejan de aparecer en los formularios.</p></div>`, id ? {id} : {});
-}
-function metalModal(id) {
-  const item = metals().find((x) => x.id === id);
-  const reception = $("#receive-form");
-  modal(item ? "Tarifa del metal" : "Añadir metal", `<div class="form-grid"><div class="span-2">${field("name", "Nombre del metal", "text", item?.name || "", `required maxlength="60" ${item ? "readonly" : 'placeholder="Ej. Paladio, cobre o rodio"'}`)}</div><div class="span-2">${moneyField("rate", "Tarifa comercial · COP / g fino", item ? S.settings.rate[item.id] : 0)}</div><p class="muted span-2">La tarifa se usa para valorar inventario y cobros futuros. Puedes dejarla en cero para registrar custodias; antes de cobrar metal debes definir una tarifa. La ley se expresa en milésimas: 1.000,00 para metal puro.</p></div>`, async (b, form, key) => {
-    const result = await mutate("metal.save", {...b, ...(item ? {id:item.id} : {})}, key);
-    if (reception && !item) {
-      const selector = reception.elements.metal;
-      const newOption = document.createElement("option");
-      newOption.value = result.id;
-      newOption.textContent = result.name;
-      selector.appendChild(newOption);
-      selector.value = result.id;
-      dirty = true;
-    }
-  }, item ? "Guardar tarifa" : "Añadir metal");
 }
 function syncMetalFields(form) {
   if (!form?.elements.metal) return;
@@ -2087,7 +2120,6 @@ function assistantPage() {
 }
 function actionLabel(a) {
   const labels = {
-    "metal.save": "Metal / tarifa guardados",
     "category.delete": "Categoría eliminada",
     "category.save": "Categoría guardada",
     "client.save": "Cliente guardado",
@@ -2144,12 +2176,15 @@ function supplierModal(id) {
 }
 function editOrder(id) {
   const o = find("orders", id);
-  simpleModal(
+  modal(
     "Editar ficha · " + o.code,
-    "order.edit",
     `<div class="form-grid"><div class="span-2">${field("description", "Trabajo", "text", o.description, 'required maxlength="2000"')}</div>${field("dueDate", "Prometida", "date", o.dueDate, "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], o.priority)}${moneyField("labor", "Mano de obra · COP", o.labor)}${moneyField("materialPrice", "Insumos · COP", o.materialPrice)}${moneyField("goldPrice", "Metal del taller · COP", o.goldPrice)}${field("taxPercent", "Impuesto (%)", "number", o.taxPercent, 'min="0" max="100" step="0.01" required')}<div class="span-2">${text("notes", "Ficha técnica", o.notes)}</div><div class="span-2">${field("reason", "Motivo del cambio", "text", "", 'required maxlength="1000"')}</div></div>`,
-    { id },
+    (b, form, key) => mutate("order.edit", {...b,id,orderMetals:readInlineMetals(form)}, key),
   );
+  const form = $("#modal-form");
+  const items = o.orderMetals || [];
+  form.dataset.metalTotal = String(items.reduce((v,x)=>v+x.price,0));
+  $(".form-grid", form).insertAdjacentHTML("beforeend", `<div class="span-2 form-section"><h3>Metales de esta orden</h3><p>Precios totales incluidos en el total de metal vendido.</p></div><div id="edit-order-metals" class="span-2 form-grid">${items.map(inlineOrderMetal).join("")}</div><div class="span-2">${button("Añadir metal a esta orden","add-inline-metal","plus","small")}</div>`);
 }
 function assignOrder(id) {
   const o = find("orders", id);
@@ -2598,6 +2633,7 @@ function bindPage() {
       try {
         if (b.laborEstimate) b.laborEstimate = JSON.parse(b.laborEstimate);
         else delete b.laborEstimate;
+        b.orderMetals = JSON.parse(b.orderMetals || "[]");
         if (photoPromise) await photoPromise;
         delete b.photo;
         b.photo = receivedPhoto;
@@ -2789,7 +2825,7 @@ function printOrder(id) {
     receiptHeader(
       o.invoice ? "COMPROBANTE COMERCIAL DE ENTREGA" : "RECIBO DE CUSTODIA",
     ) +
-      `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
+      `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${(o.orderMetals || []).map((x)=>`<p class="receipt-pre">${E(x.name)}: ${cop(x.price)}</p>`).join("")}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
   );
 }
 function printPayment(id) {
@@ -3092,12 +3128,26 @@ async function handleAction(action, id, el) {
     case "new-category":
       categoryModal();
       break;
-    case "new-metal":
-      metalModal();
+    case "new-order-metal":
+      orderMetalModal();
       break;
-    case "edit-metal":
-      metalModal(id);
+    case "edit-order-metal":
+      orderMetalModal(id);
       break;
+    case "remove-order-metal":
+      removeOrderMetal(id);
+      break;
+    case "add-inline-metal": {
+      const form = $("#modal-form");
+      $("#edit-order-metals", form).insertAdjacentHTML("beforeend", inlineOrderMetal({id:crypto.randomUUID(),name:"",price:0}));
+      break;
+    }
+    case "remove-inline-metal": {
+      const form = $("#modal-form");
+      $$('[data-order-metal-row]',form).find((x)=>x.dataset.orderMetalRow===id)?.remove();
+      updateInlineMetalTotal(form);
+      break;
+    }
     case "edit-category":
       categoryModal(id);
       break;
@@ -3741,6 +3791,7 @@ function updateModalCalculations(el) {
   const f = $("#modal-form");
   if (!f) return;
   const b = inputData(f);
+  if (el.name?.startsWith("orderMetalPrice-")) updateInlineMetalTotal(f);
   if ($("#labor-preview", f)) updateLaborPreview();
   if ($("#opening-preview")) updateShiftOpening();
   if ($("#payment-preview")) {

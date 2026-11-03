@@ -6,6 +6,11 @@
 [hidden] {
   display: none !important;
 }
+#order-metal-list,
+#edit-order-metals {
+  min-width: 0;
+  max-width: 100%;
+}
 .gold-opening-row {
   padding: 16px;
   margin-top: 12px;

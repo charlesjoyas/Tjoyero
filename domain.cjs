@@ -313,6 +313,17 @@ function timeline(o, a, text) {
   o.updatedAt = now();
   o.history.push({ at: now(), actor: a.name, text });
 }
+function orderMetalItems(items) {
+  assert(Array.isArray(items) && items.length <= 50, "Puedes detallar hasta 50 metales por orden.");
+  const ids = new Set();
+  const normalized = items.map((x) => {
+    assert(x && typeof x.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(x.id) && !ids.has(x.id), "Identificador de metal de la orden inválido.");
+    ids.add(x.id);
+    return {id:x.id,name:str(x.name,"Nombre del metal de la orden",120),price:money(x.price,"Precio total del metal")};
+  });
+  money(normalized.reduce((v,x)=>v+x.price,0), "Total de metales de la orden");
+  return normalized;
+}
 function quote(s, b) {
   const labor = money(b.labor ?? 0, "Mano de obra"),
     materialPrice = money(b.materialPrice ?? 0, "Materiales"),
@@ -328,13 +339,16 @@ function quote(s, b) {
   );
   money(labor + materialPrice + goldPrice + tax, "Total del presupuesto");
   let laborEstimate;
+  const items = b.orderMetals === undefined ? undefined : orderMetalItems(b.orderMetals);
+  if (items) assert(items.reduce((v,x)=>v+x.price,0) <= goldPrice, "El total de metal vendido no puede ser menor que los metales detallados.");
   if (b.laborEstimate !== undefined) {
     try {
       laborEstimate = Labor.calculate(b.laborEstimate);
     } catch (e) { fail(e.message); }
   }
   return { labor, materialPrice, goldPrice, taxPercent, tax,
-    ...(laborEstimate ? {laborEstimate} : {}) };
+    ...(laborEstimate ? {laborEstimate} : {}),
+    ...(items ? {orderMetals:items} : {}) };
 }
 function allocate(amount, caps) {
   const sum = caps.reduce((a, b) => a + b, 0);
@@ -355,24 +369,6 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
-    case "metal.save": {
-      permit(a, "settings");
-      const metals = s.settings.metals || defaultMetals();
-      const name = str(b.name, "Nombre del metal", 60);
-      const key = metalKey(name);
-      assert(/^[\p{L}\p{N}][\p{L}\p{N} .()-]{0,59}$/u.test(key) && !["constructor", "prototype", "__proto__"].includes(key), "Usa un nombre de metal válido, sin caracteres especiales.");
-      const existing = b.id ? metals.find((x) => x.id === b.id) : null;
-      assert(!b.id || existing, "Metal no encontrado.", 404);
-      assert(!existing || existing.id === key, "El nombre de un metal registrado se conserva para mantener su historial.");
-      assert(existing || !metals.some((x) => x.id === key), "Ya existe un metal con ese nombre.");
-      assert(existing || metals.length < 100, "Puedes registrar hasta 100 metales.");
-      const rate = money(b.rate, "Tarifa por gramo fino");
-      const item = existing || {id:key,name};
-      if (!existing) metals.push(item);
-      s.settings.metals = metals;
-      s.settings.rate[item.id] = rate;
-      return item;
-    }
     case "category.delete": {
       permit(a, "settings");
       const categories = s.settings.goldCategories || defaultGoldCategories();
@@ -538,6 +534,7 @@ function execute(s, action, b, a) {
       );
       const reason = str(b.reason, "Motivo", 1000);
       const q = quote(s, b);
+      assert((q.orderMetals ?? o.orderMetals ?? []).reduce((v,x)=>v+x.price,0) <= q.goldPrice, "El total de metal vendido no puede ser menor que los metales detallados.");
       assert(
         q.labor + q.materialPrice + q.goldPrice + q.tax >= paid(s, o),
         "El presupuesto no puede ser menor a los abonos existentes.",
@@ -1785,6 +1782,10 @@ function validateState(s) {
     ])
       money(o[key], "Valor de orden");
     money(total(o), "Presupuesto total");
+    if (o.orderMetals !== undefined) {
+      const items = orderMetalItems(o.orderMetals);
+      assert(items.reduce((v,x)=>v+x.price,0) <= o.goldPrice, "Detalle de metales incompatible con el presupuesto.");
+    }
     if (o.laborEstimate !== undefined) {
       let calculated;
       try { calculated = Labor.calculate(o.laborEstimate); }
