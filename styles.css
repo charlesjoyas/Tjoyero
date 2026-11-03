@@ -637,6 +637,9 @@ tbody tr[data-open]:hover {
 .table-card {
   padding: 22px 0 4px;
 }
+#metal-movements {
+  scroll-margin-top: 90px;
+}
 .table-card > .card-head,
 .table-card > .filters {
   padding: 0 22px;

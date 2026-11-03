@@ -71,7 +71,23 @@ const D = require("../domain.cjs"), ExcelJS = require("../exceljs.min.js");
     assert.equal(sheet.rowCount, s.payments.length + 1);
     assert.equal(sheet.getCell("D2").value, 120000); assert.equal(sheet.getCell("J2").value, 1000);
     assert.equal(sheet.getCell("L3").value, "Sí"); assert.equal(sheet.getCell("N3").value, "000123");
-    await page.goto(base + "/#gold"); await page.locator('[data-filter="ledgerMetal"]').selectOption("plata");
+    await page.goto(base + "/#gold");
+    for(const width of [1440,390,320]){
+      await page.setViewportSize({width,height:1000});
+      await page.locator('[data-filter="ledgerMetal"]').selectOption("plata");
+      await page.locator('[data-filter="ledgerOwner"]').selectOption("clientes");
+      await page.locator('[data-filter="ledgerFrom"]').fill("2099-01-01");
+      await page.locator('[data-action="filter-account"][data-id="own"]').click();
+      await page.waitForFunction(()=>{const rect=document.querySelector('#metal-movements-title').getBoundingClientRect();return rect.top>=0&&rect.bottom<innerHeight/2;});
+      assert.equal(await page.evaluate(()=>document.activeElement.id),"metal-movements-title","El botón lleva el foco al listado");
+      assert.equal(await page.locator('[data-filter="ledgerAccount"]').inputValue(),"own");
+      for(const name of["ledgerMetal","ledgerOwner","ledgerPurity","ledgerFrom","ledgerTo"])assert.equal(await page.locator(`[data-filter="${name}"]`).inputValue(),"");
+      assert.equal(await page.locator('#metal-movements tbody tr').count(),s.ledger.filter(x=>x.from==="own"||x.to==="own").length);
+      assert.ok(await page.locator('#metal-movements [data-action="movement-detail"]').count());
+      await page.locator('#metal-movements [data-action="movement-detail"]').first().click();await page.locator('#dialog[open]').waitFor();assert.match(await page.locator('#dialog').innerText(),/Peso bruto/);await page.keyboard.press("Escape");
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    await page.locator('[data-filter="ledgerAccount"]').selectOption("");await page.locator('[data-filter="ledgerMetal"]').selectOption("plata");
     sheet = await download("export-ledger");
     assert.equal(sheet.rowCount, 2); assert.equal(sheet.getCell("E2").value, "plata"); assert.equal(sheet.getCell("G2").value, 2.345); assert.equal(sheet.getCell("H2").value, 2.169125);
     await page.locator('[data-filter="ledgerMetal"]').selectOption("oro");

@@ -1526,7 +1526,7 @@ function goldPage() {
       })
       .join(
         "",
-      )}</div><section class="card table-card section-gap"><div class="card-head"><div><h2>Movimientos de metal</h2><p>${number(ledger.length)} movimientos · historial sin borrado.</p></div>${button("Exportar Excel", "export-ledger", "download", "small")}</div><div class="filters"><select class="control" data-filter="ledgerAccount" aria-label="Cuenta">${option("", "Todas las cuentas", q)}${Object.entries(
+      )}</div><section id="metal-movements" class="card table-card section-gap" aria-labelledby="metal-movements-title"><div class="card-head"><div><h2 id="metal-movements-title" tabindex="-1">Movimientos de metal</h2><p>${E(q?ACC[q]:"Todas las cuentas")} · ${number(ledger.length)} movimientos · historial sin borrado.</p></div>${button("Exportar Excel", "export-ledger", "download", "small")}</div><div class="filters"><select class="control" data-filter="ledgerAccount" aria-label="Cuenta">${option("", "Todas las cuentas", q)}${Object.entries(
       ACC,
     )
       .map(([k, v]) => option(k, v, q))
@@ -3716,8 +3716,11 @@ async function handleAction(action, id, el) {
       newUser(id);
       break;
     case "filter-account":
+      for (const key of ["ledgerMetal","ledgerPurity","ledgerOwner","ledgerFrom","ledgerTo"]) delete filters[key];
       filters.ledgerAccount = id;
       render();
+      $("#metal-movements-title")?.focus({preventScroll:true});
+      $("#metal-movements")?.scrollIntoView({behavior:"smooth",block:"start"});
       break;
     case "order-board":
       filters.board = true;
