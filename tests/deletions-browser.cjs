@@ -1,0 +1,33 @@
+"use strict";
+const {chromium}=require("playwright"),{createApp}=require("../server.cjs"),D=require("../domain.cjs");
+const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),assert=require("node:assert/strict");
+(async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),"aurea-delete-ui-")),app=createApp({dataDir:dir});await new Promise(r=>app.server.listen(0,"127.0.0.1",r));const base="http://127.0.0.1:"+app.server.address().port;let browser;
+try{
+ browser=await chromium.launch({headless:true,channel:"msedge"});const context=await browser.newContext({viewport:{width:1440,height:1000},locale:"es-CO"});await context.request.post(base+"/api/setup",{data:{workshop:"Eliminar operaciones",name:"Admin",username:"admin",password:"1234"}});
+ const state=async()=>(await(await context.request.get(base+"/api/state")).json()).state;
+ async function act(action,data){const s=await state();const r=await context.request.post(base+"/api/action",{headers:{"If-Match":String(s.revision),"Idempotency-Key":crypto.randomUUID()},data:{action,data}});assert.equal(r.status(),200,await r.text());return(await r.json()).result;}
+ const supplier=await act("supplier.save",{name:"Proveedor"});const purchase=await act("purchase.create",{supplierId:supplier.id,document:"F-ELIMINAR",dueDate:"2026-12-01",metal:"oro",purity:750,weight:2,rate:100000});
+ await act("shift.open",{opening:100000});const expense=await act("expense.create",{category:"Otros",concept:"Gasto eliminado de la pestaña",amount:10000,method:"cash"});
+ const page=await context.newPage(),errors=[];page.on("pageerror",e=>errors.push(e.message));await page.goto(base+"/#reversals");
+ await page.locator('[data-action="delete-operation"]').first().click();const form=page.locator('#modal-form');await form.locator('[name="type"]').selectOption("purchase");await form.locator('[name="id"]').selectOption(purchase.id);await form.locator('[name="reason"]').fill("Compra duplicada devuelta al proveedor");await form.locator('[name="confirmed"]').check();
+ assert.equal(await form.locator('[name="confirmation"]').evaluate(el=>el.checkValidity()),false,"No permite eliminar sin escribir la palabra");await form.locator('[name="confirmation"]').fill("ELIMINAR");
+ const before=await state();await form.locator('button[type="submit"]').click();await form.locator('#reversal-preview h2').waitFor();assert.deepEqual(await state(),before,"La vista previa no elimina");assert.match(await form.locator('button[type="submit"]').innerText(),/Confirmar eliminación/);
+ for(const width of[1440,768,390,320]){await page.setViewportSize({width,height:950});assert.equal(await page.locator('#dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false,"Eliminar móvil "+width);}
+ await form.locator('button[type="submit"]').click();await page.locator('#dialog').waitFor({state:"hidden"});let s=await state();assert.ok(s.purchases[0].deletedAt);assert.equal(D.balance(s,"own","oro",750),0);
+ await page.setViewportSize({width:1440,height:1000});await page.goto(base+"/#purchases");assert.doesNotMatch(await page.locator('#page table').first().innerText(),/F-ELIMINAR/);
+ const waiting=page.waitForEvent("download");await page.locator('[data-action="export-purchases"]').click();const file=await waiting,book=new(require("../exceljs.min.js").Workbook)();await book.xlsx.load(fs.readFileSync(await file.path()));assert.equal(book.worksheets[0].rowCount,1);
+ const reversed=await act("operation.reverse",{type:"expense",id:expense.id,reason:"Gasto devuelto",confirmed:true});await page.goto(base+"/#reversals");await page.reload();
+ await page.locator(`[data-action="delete-operation"][data-id="expense|history:${reversed.id}"]`).click();assert.match(await form.locator('[name="id"]').inputValue(),/^history:/);
+ await form.locator('[name="reason"]').fill("Retirar el gasto ya devuelto");await form.locator('[name="confirmation"]').fill("ELIMINAR");await form.locator('[name="confirmed"]').check();
+ const beforeHistory=await state();await form.locator('button[type="submit"]').click();await form.locator('#reversal-preview h2').waitFor();await form.locator('button[type="submit"]').click();await page.locator('#dialog').waitFor({state:"hidden"});
+ s=await state();assert.equal(s.cashEntries.length,beforeHistory.cashEntries.length);assert.ok(s.expenses[0].deletedAt);assert.equal(s.deletions.length,2);assert.equal(D.cashExpected(s,s.shifts[0]),100000);
+ await page.goto(base+"/#expenses");assert.doesNotMatch(await page.locator('#page table').innerText(),/Gasto eliminado de la pestaña/);await page.reload();await page.locator('#page h1').waitFor();assert.doesNotMatch(await page.locator('#page table').innerText(),/Gasto eliminado de la pestaña/);
+ const audit=(await(await context.request.get(base+"/api/state")).json()).audit;assert.equal(audit.filter(x=>x.action==="operation.delete").length,2);
+ const oldExpense=await act("expense.create",{category:"Otros",concept:"Gasto de turno anterior",amount:5000,method:"cash"});await act("shift.close",{counted:95000,goldCounts:[],receiver:"Admin",reason:"Verificado"});await act("shift.open",{opening:0});
+ const oldReverse=await act("operation.reverse",{type:"expense",id:oldExpense.id,reason:"Gasto devuelto al turno actual",confirmed:true});
+ await act("operation.delete",{type:"expense",id:oldExpense.id,reversalId:oldReverse.id,reason:"Retirar registro ya compensado",confirmed:true,confirmation:"ELIMINAR"});
+ await page.goto(base+"/#cash");await page.reload();await page.locator('#page h1').waitFor();assert.equal(await page.locator('.kpis .kpi-value').first().innerText(),"$ 5.000,00","Eliminar no oculta dinero real devuelto en el turno actual");
+ s=await state();assert.equal(s.shifts[0].expected,95000);assert.equal(D.cashExpected(s,s.shifts[1]),5000);
+ await act("user.create",{name:"Contador",username:"contador",password:"1234",role:"contador"});const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"contador",password:"1234"}});assert.equal((await restricted.request.post(base+"/api/reversal-preview",{data:{mode:"delete"}})).status(),403);
+ assert.deepEqual(errors,[]);console.log("Eliminar UI: botón rojo, palabra obligatoria, doble confirmación, vista previa, retiro de compras/gastos y Excel, ya reversadas sin duplicar, auditoría, roles y móvil correctos.");
+}finally{if(browser)await browser.close();await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}})().catch(e=>{console.error(e);process.exitCode=1;});

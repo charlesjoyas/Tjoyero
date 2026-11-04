@@ -496,7 +496,8 @@ function createApp(options = {}) {
           D.permit(a,"adjust");
           const data=await body(req), before=await read(), next=structuredClone(before);
           D.assert(data&&typeof data==="object"&&!Array.isArray(data),"Solicitud de reversión inválida.");
-          const result=D.execute(next,"operation.reverse",data,a);
+          D.assert(data.mode===undefined||["reverse","delete"].includes(data.mode),"Modo de operación inválido.");
+          const result=D.execute(next,data.mode==="delete"?"operation.delete":"operation.reverse",data,a);
           D.validateState(next);
           let bankDelta=0;
           if(data.type==="order")bankDelta=next.payments.slice(before.payments.length).reduce((sum,p)=>sum+(p.bank||0),0);
@@ -505,6 +506,7 @@ function createApp(options = {}) {
             const payment=(data.type==="supplierPayment"?before.supplierPayments:data.type==="expense"?(before.expenses||[]):before.settlements).find(x=>x.id===data.id);
             if(payment?.method==="bank")bankDelta=payment.amount;
           }
+          if(data.mode==="delete"&&!next.reversals.slice((before.reversals||[]).length).some(x=>x.type===data.type&&x.targetId===data.id))bankDelta=0;
           return await json(res,200,{
             revision:before.revision,summary:result.summary,
             bankDelta,

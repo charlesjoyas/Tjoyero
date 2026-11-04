@@ -12,6 +12,19 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: eliminar una operación reversada, persistencia, reintentos y restauración sin compensar dos veces",async t=>{
+ const f=await fixture(t);await f.request("/api/setup",{workshop:"Eliminar",name:"Admin",username:"admin",password:"1234",setupKey});
+ const expense=(await f.act("expense.create",{category:"Otros",concept:"Gasto bancario",amount:20000,method:"bank",reference:"BANCO"})).body.result;
+ const reversal=(await f.act("operation.reverse",{type:"expense",id:expense.id,reason:"Ya devuelto",reference:"DEV",confirmed:true})).body.result;
+ const backup=(await f.request("/api/backup")).body,before=await f.state();
+ const payload={mode:"delete",type:"expense",id:expense.id,reversalId:reversal.id,reason:"Eliminar registro ya compensado",confirmation:"ELIMINAR",confirmed:true};
+ const preview=await f.request("/api/reversal-preview",payload);assert.equal(preview.status,200);assert.equal(preview.body.bankDelta,0);assert.equal(preview.body.cashDelta,0);assert.deepEqual(await f.state(),before);
+ const key=randomUUID();assert.equal((await f.act("operation.delete",payload,key)).status,200);const deleted=await f.state();assert.ok(deleted.expenses[0].deletedAt);assert.equal(deleted.cashEntries.length,before.cashEntries.length);
+ assert.equal((await f.act("operation.delete",payload,key)).status,200);assert.deepEqual(await f.state(),deleted);await f.open();assert.deepEqual(await f.state(),deleted);
+ assert.equal((await f.act("operation.delete",payload)).status,409);
+ assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);const restored=await f.state();assert.equal(restored.deletions,undefined);assert.equal(restored.expenses[0].deletedAt,undefined);assert.equal(restored.expenses[0].reversedAt,before.expenses[0].reversedAt);
+});
+
 test("Nube: orden de compra por categorías, reintento, inventario, reversión y restauración",async t=>{
   const f=await fixture(t);
   await f.request("/api/setup",{workshop:"Compras",name:"Admin",username:"admin",password:"1234",setupKey});

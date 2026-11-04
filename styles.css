@@ -421,6 +421,11 @@ svg {
   background: #fff4f3;
   border-color: #eed2cf;
 }
+.btn.danger-solid {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+}
 .btn.small {
   padding: 6px 10px;
   min-height: 30px;

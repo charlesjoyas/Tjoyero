@@ -77,6 +77,7 @@ test(
       "server.cjs",
       "domain.cjs",
       "reversals.cjs",
+      "deletions.cjs",
       "app.js",
       "excel-export.js",
       "exceljs.min.js",

@@ -375,6 +375,10 @@ function allocate(amount, caps) {
 }
 function execute(s, action, b, a) {
   switch (action) {
+    case "operation.delete": {
+      permit(a,"adjust");
+      return require("./deletions.cjs")(s,b,a,{assert,get,str,id,now,execute});
+    }
     case "operation.reverse": {
       permit(a,"adjust");
       return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM});
@@ -1770,6 +1774,23 @@ function validateState(s) {
       assert(r&&typeof r.id==="string"&&!keys.has(r.id)&&typeof r.type==="string"&&typeof r.targetId==="string"&&typeof r.actor==="string"&&typeof r.summary==="string"&&Number.isFinite(Date.parse(r.at)),"Registro de reversión inválido.");
       str(r.reason,"Motivo de reversión",1000);keys.add(r.id);
     }
+  }
+  if(s.deletions!==undefined){
+    assert(Array.isArray(s.deletions),"Historial de eliminaciones inválido.");
+    const ids=new Set(),reversed=new Set();
+    for(const entry of s.deletions){
+      assert(entry&&typeof entry.id==="string"&&!ids.has(entry.id)&&typeof entry.type==="string"&&typeof entry.targetId==="string"&&typeof entry.actor==="string"&&typeof entry.summary==="string"&&Number.isFinite(Date.parse(entry.at)),"Eliminación inválida.");
+      str(entry.reason,"Motivo de eliminación",1000);str(entry.reference,"Soporte",200,false);
+      const reversal=(s.reversals||[]).find(x=>x.id===entry.reversalId);
+      assert(reversal&&reversal.type===entry.type&&reversal.targetId===entry.targetId&&reversal.deletionId===entry.id&&reversal.deletedAt===entry.at&&!reversed.has(reversal.id),"El registro eliminado no concilia con su reversión.");
+      ids.add(entry.id);reversed.add(reversal.id);
+    }
+  }
+  const deletionIndex=new Map((s.deletions||[]).map(x=>[x.id,x]));
+  for(const row of [...s.orders,...s.ledger,...s.payments,...s.cashEntries,...s.purchases,...s.supplierPayments,...s.materialMoves,...s.settlements,...s.stock,...s.stock.flatMap(x=>x.transfers||[]),...s.orders.flatMap(x=>x.materialUsage||[]),...(Array.isArray(s.expenses)?s.expenses:[]),...(s.reversals||[])]){
+    if(row.deletedAt===undefined)continue;
+    const deletion=deletionIndex.get(row.deletionId);
+    assert(deletion&&deletion.at===row.deletedAt&&deletion.actor===row.deletedBy,"Registro eliminado sin evidencia de auditoría válida.");
   }
   const ids = (collection) => new Set(s[collection].map((x) => x.id));
   const expensesByEntry = new Map();

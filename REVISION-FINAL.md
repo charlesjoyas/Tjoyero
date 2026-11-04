@@ -29,6 +29,12 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
 
+## Eliminar operaciones desde Reversiones
+
+Se incorpora un botón rojo para eliminar operaciones vigentes o registros ya reversados. Exige la palabra ELIMINAR, vista previa y confirmación. Primero se compensa la operación cuando corresponde; después desaparece de sus listados y exportaciones. Una reversión ya realizada no genera otra devolución. Los originales y sus compensaciones quedan retenidos para conciliación y auditoría, con un registro de eliminación ligado a la reversión correspondiente.
+
+Se verifican confirmaciones, permisos de administrador, dependencias, compra, pagos a proveedor, gastos, caja, libro de metales, insumos, entrega, etapas y órdenes completas. Las pruebas de navegador comprueban la retirada de registros, Excel, auditoría y pantallas móviles. Se comprueba también la devolución de un gasto entre turnos, manteniendo el cierre anterior y el dinero del turno actual, y la persistencia e idempotencia con libSQL.
+
 ## Valor monetario del Libro de metales — 4 de noviembre de 2026
 
 Se muestran el valor general, el metal propio y el de clientes, el desglose por metal y el total en cada ubicación. Las existencias detalladas incluyen una columna de valor estimado por ley y propietario. La valoración usa el fino de cada metal y su tarifa actual en Configuración; no duplica traslados, no suma pesos finos entre metales distintos y no incorpora pérdidas ni metal ya entregado.
