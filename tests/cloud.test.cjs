@@ -12,6 +12,18 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Revisión nube: copias con consumos corruptos se rechazan como datos inválidos y no reemplazan la operación",async t=>{
+ const f=await fixture(t);await f.request("/api/setup",{workshop:"Revisión de copias",name:"Admin",username:"admin",password:"1234",setupKey});
+ const client=(await f.act("client.save",{name:"Cliente"})).body.result,material=(await f.act("material.save",{name:"Broche",unit:"pieza",quantity:5,unitCost:1000,min:0})).body.result;
+ const order=(await f.act("order.create",{clientId:client.id,type:"Reparación",description:"Cadena",condition:"Recibida",metal:"oro",purity:750,receivedWeight:1,dueDate:"2026-12-01",labor:10000,taxPercent:0})).body.result;
+ await f.act("material.use",{orderId:order.id,materialId:material.id,quantity:1});const backup=(await f.request("/api/backup")).body,before=await f.state();
+ for(const corrupt of [s=>{s.orders[0].materialUsage=[null];},s=>{s.orders[0].materialUsage[0].cost++;},s=>{s.orders[0].materialUsage.push(structuredClone(s.orders[0].materialUsage[0]));}]){
+  const bad=structuredClone(backup);corrupt(bad.state);const{checksum,...content}=bad;bad.checksum=createHash("sha256").update(JSON.stringify(content)).digest("hex");
+  const response=await f.act("backup.restore",{backup:bad,password:"1234"});assert.equal(response.status,400);assert.deepEqual(await f.state(),before);
+ }
+ assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);
+});
+
 test("Nube: eliminar una operación reversada, persistencia, reintentos y restauración sin compensar dos veces",async t=>{
  const f=await fixture(t);await f.request("/api/setup",{workshop:"Eliminar",name:"Admin",username:"admin",password:"1234",setupKey});
  const expense=(await f.act("expense.create",{category:"Otros",concept:"Gasto bancario",amount:20000,method:"bank",reference:"BANCO"})).body.result;

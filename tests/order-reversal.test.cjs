@@ -1,6 +1,18 @@
 "use strict";
 const {test}=require("node:test"),assert=require("node:assert/strict"),D=require("../domain.cjs");
 const admin={name:"Admin",role:"admin"};
+test("Revisión: cancelar sin pieza conserva toda la limalla o la pérdida, sin crear metal",()=>{
+ const f=fixture(),o=f.order();f.assign(o.id);
+ f.reverse(o.id,{metalReturns:[{metal:"oro",purity:750,pieceWeight:0,scrapWeight:3},{metal:"plata",purity:925,pieceWeight:0,scrapWeight:1}]});
+ assert.equal(f.get(o.id).status,"cancelled");assert.equal(f.get(o.id).returned.pieceMg,0);assert.equal(f.get(o.id).returned.scrapMg,4000);assert.equal(D.balance(f.s,"process","oro",750),0);assert.equal(D.balance(f.s,"finished","plata",925),0);
+ const lost=f.order();f.assign(lost.id);f.reverse(lost.id,{metalReturns:[{metal:"oro",purity:750,pieceWeight:0,scrapWeight:0},{metal:"plata",purity:925,pieceWeight:0,scrapWeight:0}]});assert.equal(f.get(lost.id).returned.lossMg,4000);
+ const open=f.order();f.assign(open.id);assert.throws(()=>f.act("order.return",{id:open.id,pieceWeight:0,scrapWeight:4}),/cada metal/);
+ const before=structuredClone(f.s);assert.throws(()=>f.act("order.return",{id:open.id,closingOrder:true,metalReturns:[{metal:"oro",purity:750,pieceWeight:0,scrapWeight:3},{metal:"plata",purity:925,pieceWeight:0,scrapWeight:1}]}),/solo se admite/);assert.deepEqual(f.s,before,"No permite aprobar un retorno sin pieza fuera del cierre completo");
+});
+test("Revisión: el cierre completo admite el soporte bancario de 200 caracteres del formulario",()=>{
+ const f=fixture(),o=f.order();f.act("payment.create",{orderId:o.id,bank:20000,bankRef:"ABONO"});const reference="A".repeat(200);
+ f.reverse(o.id,{refundMethod:"bank",reference});assert.equal(f.get(o.id).status,"cancelled");assert.equal(f.s.payments.at(-1).bankRef,reference);
+});
 function fixture(){
   const s=D.initialState();s.settings.rate.oro=100000;s.settings.rate.plata=10000;
   const act=(action,data)=>{const next=structuredClone(s),result=D.execute(next,action,data,admin);D.validateState(next);Object.keys(s).forEach(key=>delete s[key]);Object.assign(s,next);return result;};

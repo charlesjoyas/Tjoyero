@@ -651,7 +651,7 @@ function execute(s, action, b, a) {
         group.indexes.forEach((index,i) => { pieces[index] = splitPieces[i]; scraps[index] = splitScraps[i]; });
         piece += pieceMg; scrap += scrapMg; loss += lossMg;
       }
-      assert(piece > 0, "La pieza terminada debe tener peso mayor que cero.");
+      assert(piece > 0 || (b.closingOrder===true && a.role==="admin"), "La pieza terminada debe tener peso mayor que cero.");
       const assigned = o.allocations.reduce((v,x) => v+x.mg,0), pct = loss * 100 / assigned;
       const reason = str(b.reason,"Observaciones de retorno",2000,maxPercent > s.settings.lossNormal);
       if (maxPercent > s.settings.lossWarning) permit(a,"adjust");
@@ -1002,7 +1002,7 @@ function execute(s, action, b, a) {
         bankRef = str(
           b.bankRef,
           "Referencia de transferencia",
-          150,
+          200,
           bankOut > 0,
         );
       cash(s, a, shift, -cashOut, "Devolución anticipo " + o.code, o.code);
@@ -1788,6 +1788,7 @@ function validateState(s) {
   }
   const deletionIndex=new Map((s.deletions||[]).map(x=>[x.id,x]));
   for(const row of [...s.orders,...s.ledger,...s.payments,...s.cashEntries,...s.purchases,...s.supplierPayments,...s.materialMoves,...s.settlements,...s.stock,...s.stock.flatMap(x=>x.transfers||[]),...s.orders.flatMap(x=>x.materialUsage||[]),...(Array.isArray(s.expenses)?s.expenses:[]),...(s.reversals||[])]){
+    assert(row&&typeof row==="object","Registro operativo inválido en la copia.");
     if(row.deletedAt===undefined)continue;
     const deletion=deletionIndex.get(row.deletionId);
     assert(deletion&&deletion.at===row.deletedAt&&deletion.actor===row.deletedBy,"Registro eliminado sin evidencia de auditoría válida.");
@@ -1875,6 +1876,7 @@ function validateState(s) {
     balances(s).every((x) => Number.isSafeInteger(x.mg) && x.mg >= 0),
     "La base contiene existencias negativas.",
   );
+  const materialMoveIndex=new Map(s.materialMoves.map(x=>[x.id,x]));
   for (const o of s.orders) {
     assert(
       clients.has(o.clientId) && (!o.smithId || smiths.has(o.smithId)),
@@ -1921,6 +1923,13 @@ function validateState(s) {
         Array.isArray(o.materialUsage),
       "Ficha de orden incompleta.",
     );
+    const usageIds=new Set();
+    for(const usage of o.materialUsage){
+      assert(usage&&typeof usage.id==="string"&&!usageIds.has(usage.id)&&materials.has(usage.materialId),"Consumo de insumo inválido.");
+      usageIds.add(usage.id);materialQuantity(usage.quantity,"Cantidad consumida",0.001);money(usage.cost,"Costo de consumo");
+      const movement=materialMoveIndex.get(usage.id);
+      assert(movement&&movement.orderId===o.id&&movement.materialId===usage.materialId&&movement.quantity===-usage.quantity&&movement.cost===usage.cost&&!!movement.reversedAt===!!usage.reversedAt,"El consumo no concilia con el movimiento de inventario.");
+    }
     for (const event of o.history)
       assert(
         event &&
@@ -1947,6 +1956,7 @@ function validateState(s) {
     if (o.returned) {
       const r = o.returned,
         base = o.allocations.reduce((v, x) => v + x.mg, 0);
+      assert(r.pieceMg>0||o.status==="cancelled","Un retorno sin pieza solo se admite al cerrar una orden cancelada.");
       assert(
         [r.pieceMg, r.scrapMg, r.lossMg].every(
           (x) => Number.isSafeInteger(x) && x >= 0,

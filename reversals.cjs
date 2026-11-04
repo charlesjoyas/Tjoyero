@@ -109,7 +109,7 @@ module.exports = function reverse(s, b, a, D) {
       }
       if(o.status==="in_progress"&&!o.returned){
         assert(b.metalReturns!==undefined,"Registra los pesos devueltos de cada metal para cerrar la orden en producción.");
-        execute(s,"order.return",{id:o.id,metalReturns:b.metalReturns,reason},a);
+        execute(s,"order.return",{id:o.id,metalReturns:b.metalReturns,reason,closingOrder:true},a);
       }
       assert(o.status==="received"||(["quality","ready"].includes(o.status)&&o.returned),"La orden no tiene un retorno válido para cerrar sus metales.");
       const refund=paid(s,o);

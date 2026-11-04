@@ -1,6 +1,27 @@
-# Revisión final de Áurea Taller — 3 de noviembre de 2026
+# Revisión final de Áurea Taller — 4 de noviembre de 2026
 
 La revisión se ejecutó con bases de datos temporales y usuarios ficticios. No se modificaron los registros reales del taller.
+
+## Última revisión a profundidad — 4 de noviembre
+
+Se recorrieron recepción y presupuestos, categorías, compras, proveedores, inventarios, trabajos con varios metales, fundición, insumos, calidad, ventas y entregas, cobros y devoluciones, gastos, turnos de caja, honorarios, valoración, reversiones, eliminación, respaldos, usuarios, permisos, impresión y Excel.
+
+Se corrigieron tres problemas reproducidos durante esta revisión:
+
+- Una orden en mesa sin pieza terminada no podía cerrarse aunque todo el retorno estuviera en limalla o se documentara la pérdida total. El cierre administrativo ahora registra esa situación sin crear gramos; un retorno normal sin pieza continúa bloqueado.
+- La reversión completa mostraba un campo de soporte bancario de 200 caracteres pero admitía solo 150 en su devolución interna. Ambos límites ahora coinciden.
+- Las copias con consumos nulos o con costos y cantidades que no coincidían con los movimientos de insumos podían producir un error interno o alterar el costo informado. Se validan los vínculos y se rechazan con un error de datos antes de reemplazar la operación.
+
+Evidencia final:
+
+- 101 pruebas de Node aprobadas; ninguna falla o prueba omitida.
+- 19 recorridos de navegador aprobados. Incluyen los últimos módulos, funcionamiento sin recursos externos, pérdidas de conexión y recuperación, exportaciones reales y PDF en Chrome/Edge.
+- 20 vistas en anchos de 1440, 1024, 768, 390, 360 y 320 píxeles, sin desbordamientos ni errores de ejecución.
+- Simulación nueva de diez jornadas: 606 operaciones, 53 órdenes, 30 compras, 59 eliminaciones y 99 reversiones. Se concilian después de cada operación los metales y propietarios, mesas, custodias, lotes, insumos, efectivo y valoración. Los diez cierres permanecen intactos. Efectivo final comprobado: 1.363.000 COP.
+- Se mantienen las simulaciones anteriores de cinco y diez jornadas, la carga de 3.000 órdenes/3.000 pagos y las pruebas de concurrencia, idempotencia, fallos de almacenamiento y copias mayores de 4,5 MB.
+- La estructura real de producción pasó la validación en modo de solo lectura. No se realizaron operaciones comerciales ni devoluciones en la base real.
+
+La balanza física sigue excluida. La impresión se verifica como salida PDF del navegador, sin certificar una impresora física. Los casos ejecutados no demuestran ausencia absoluta de errores en cualquier entorno.
 
 ## Correcciones realizadas
 

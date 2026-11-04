@@ -92,11 +92,11 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     await modal.locator('[name="type"]').selectOption("cash");assert.equal(await modal.locator('[name="reversePiece-0"]').isDisabled(),true,"No exige pesos cuando cambia el tipo de reversión");
     await modal.locator('[name="type"]').selectOption("order");await modal.locator('[name="id"]').selectOption(inProgress.id);
     await modal.locator('[name="reversePiece-0"]').fill("1,950");await modal.locator('[name="reverseScrap-0"]').fill("0,030");
-    await modal.locator('[name="refundMethod"]').selectOption("bank");await modal.locator('[name="reference"]').fill("DEV-BANCO-001");
+    await modal.locator('[name="refundMethod"]').selectOption("bank");await modal.locator('[name="reference"]').fill("R".repeat(200));
     await modal.locator('[name="reason"]').fill("Trabajo cancelado con retorno pesado y reintegro bancario");await modal.locator('[name="confirmed"]').check();
     await submit.click();await modal.locator('#reversal-preview h2').waitFor();assert.match(await modal.locator('#reversal-preview').innerText(),/-10\.000,00/);
     await page.setViewportSize({width:320,height:950});assert.equal(await page.locator('#dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false,"Reversión completa móvil");
-    await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});saved=await state();assert.equal(saved.orders.find(x=>x.id===inProgress.id).status,"cancelled");assert.equal(saved.payments.at(-1).bank,-10000);
+    await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});saved=await state();assert.equal(saved.orders.find(x=>x.id===inProgress.id).status,"cancelled");assert.equal(saved.payments.at(-1).bank,-10000);assert.equal(saved.payments.at(-1).bankRef,"R".repeat(200));
     await page.setViewportSize({width:1440,height:1000});
     await act("user.create",{name:"Consulta",username:"consulta",password:"1234",role:"consulta"});
     const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"consulta",password:"1234"}});
