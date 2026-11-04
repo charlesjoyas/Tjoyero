@@ -29,6 +29,14 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
 
+## Órdenes de compra de oro por categoría — 4 de noviembre de 2026
+
+Se integra la compra de una o varias categorías activas de oro en una orden con proveedor, documento, vencimiento, peso recibido y precio por gramo de cada categoría. La confirmación ingresa el metal inmediatamente a bodega por su ley y registra una cuenta por pagar, sin descontar caja hasta pagar al proveedor. El importe se calcula de forma exacta sobre los gramos recibidos y se conserva el fino en el libro de metales. El catálogo puede modificarse o eliminar categorías sin cambiar el historial de las compras.
+
+La orden ofrece comprobante y exportación Excel; los totales de la orden aparecen una sola vez en el archivo. Las reversiones devuelven cada ley, bloquean pagos vigentes o existencias insuficientes y no dejan ingresos parciales. Se conserva la compra manual de otros metales y el cálculo de las compras anteriores.
+
+Verificación: 89 pruebas de Node aprobadas, incluida la persistencia con el SDK de libSQL, reintentos sin duplicar inventario y restauración. El recorrido de navegador verifica categorías personalizadas e inactivas, varios renglones, totales, inventario inmediato, comprobante, Excel y pantallas de 320 px.
+
 ## Reversión completa de órdenes con producción
 
 Se corrige el selector que solo ofrecía órdenes recibidas. «Orden de trabajo completa» incluye todas las órdenes no anuladas, con revisión de retorno para las que siguen en mesa, devolución del saldo neto abonado y cierre de la custodia. La recuperación del metal propio conserva su ley y metal; no se borran las pérdidas, insumos ni honorarios reales. Si existía una entrega de venta se compensa en la misma transacción; las transferencias de producción propia deben devolverse antes del cierre. Las reversiones anteriores y las devoluciones ya realizadas no se duplican.

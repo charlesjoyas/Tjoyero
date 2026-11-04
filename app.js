@@ -642,7 +642,7 @@ const navGroups = [
       ["payments", "Cobros y cartera", "cash"],
       ["cash", "Caja y turnos", "cash"],
       ["expenses", "Gastos del taller", "cash"],
-      ["purchases", "Compras y proveedores", "box"],
+      ["purchases", "Órdenes de compra", "box"],
       ["stock", "Piezas terminadas", "gem"],
       ["reports", "Reportes y auditoría", "chart"],
       ["reversals", "Reversiones", "refresh"],
@@ -1849,24 +1849,27 @@ function cashPage() {
     )}</section>`
   );
 }
+const purchaseItems = p => p.items || [{metal:p.metal,purity:p.purity,mg:p.mg,unitPrice:p.rate,total:p.total,categoryName:p.metal+" · ley "+number(p.purity)}];
+function purchasePending(p) {return p.reversedAt?0:p.total-S.supplierPayments.filter(x=>x.purchaseId===p.id&&!x.reversedAt).reduce((sum,x)=>sum+x.amount,0);}
 function purchasesPage() {
   return (
     head(
       "EL ORIGEN DE TUS MATERIALES",
-      "Compras y proveedores",
-      "Ingreso de metales a bodega y cuentas por pagar.",
+      "Órdenes de compra y proveedores",
+      "Compra de oro por categoría, ingreso a bodega y cuentas por pagar.",
       allowed("purchases", "Nuevo proveedor", "new-supplier", "plus") +
+        allowed("purchases", "Compra de otro metal", "new-metal-purchase", "gold") +
         allowed(
           "purchases",
-          "Registrar compra",
+          "Nueva orden de compra",
           "new-purchase",
           "plus",
           "primary",
-        ),
+        ) + button("Exportar Excel","export-purchases","download"),
     ) +
-    `<section class="card table-card"><div class="card-head"><div><h2>Compras de metal</h2><p>La compra registra el ingreso. Su pago se registra por separado.</p></div></div>${table(
+    `<section class="card table-card"><div class="card-head"><div><h2>Órdenes de compra recibidas</h2><p>La compra registra el ingreso. Su pago se registra por separado.</p></div></div>${table(
       [
-        "Compra / documento",
+        "Orden / documento",
         "Proveedor",
         "Metal / ley",
         "Peso",
@@ -1885,11 +1888,11 @@ function purchasesPage() {
           return tr([
             `<strong>${E(x.code)}</strong>${reversalBadge(x)}<small>${E(x.document)} · ${dt(x.at)}</small>`,
             E(find("suppliers", x.supplierId)?.name),
-            E(x.metal) + " · " + number(x.purity),
+            purchaseItems(x).map(item=>`<div>${E(item.categoryName)}<small>${weight(item.mg)} · ley ${number(item.purity)}</small></div>`).join(""),
             weight(x.mg),
             cop(x.total),
             `<span style="color:var(--debt)">${cop(pending)}</span>`,
-            x.reversedAt ? reversalBadge(x) : ((pending
+            button("Comprobante","print-purchase","print","small",x.id) + (x.reversedAt ? reversalBadge(x) : ((pending
               ? allowed(
                   "purchases",
                   "Pagar",
@@ -1898,7 +1901,7 @@ function purchasesPage() {
                   "small",
                   x.id,
                 )
-              : badge("Pagada")) + reversalButton("purchase",x.id)),
+              : badge("Pagada")) + reversalButton("purchase",x.id))),
           ]);
         })
         .join(""),
@@ -2595,7 +2598,45 @@ function closeShift() {
     "Confirmar cierre",
   );
 }
+let purchaseRowIndex=0;
+function purchaseCategoryRow(index) {
+  return `<section class="card section-gap" data-purchase-row="${index}"><div class="card-head"><h3>Oro a comprar</h3>${button("Quitar","remove-purchase-row","","small",String(index))}</div><div class="form-grid">${select("purchaseCategory-"+index,"Categoría de oro",[["","Elegir categoría"],...goldCategories().filter(x=>x.active).map(x=>[x.id,x.name+" · ley "+number(x.purity)])],"")}${weightField("purchaseWeight-"+index,"Peso recibido (g)","")}${moneyField("purchasePrice-"+index,"Precio por gramo de esta categoría · COP","")}<div class="field"><span>Valor de esta categoría</span><strong data-purchase-subtotal>${cop(0)}</strong></div></div><p class="muted">El total se calcula con el peso recibido de esta categoría. El fino se registra aparte.</p></section>`;
+}
+function updatePurchaseOrderPreview() {
+  const form=$("#modal-form"),target=$("#purchase-order-preview",form);if(!target)return;
+  let total=0,mg=0;const weights=new Map();
+  try{
+    $$("[data-purchase-row]",form).forEach(row=>{
+      const index=row.dataset.purchaseRow,category=goldCategories().find(x=>x.id===form.elements["purchaseCategory-"+index].value);
+      const rawWeight=numericValue(form.elements["purchaseWeight-"+index]),weight=Math.round(rawWeight*1000),price=numericValue(form.elements["purchasePrice-"+index]);
+      const value=N.weightPrice(weight,price);total+=value;mg+=weight;
+      if(total>1e12||mg>1e9)throw new Error("El total o el peso de la compra supera el máximo permitido.");
+      $("[data-purchase-subtotal]",row).textContent=cop(value);
+      if(category){const key=category.purity;weights.set(key,(weights.get(key)||0)+weight);}
+    });
+    target.innerHTML=row("Peso total recibido",weight(mg))+row("TOTAL ORDEN DE COMPRA",cop(total),"total")+[...weights].map(([purity,mg])=>row("Ingreso a bodega · oro ley "+number(purity),weight(mg))).join("");
+  }catch(error){target.textContent=error.message;}
+}
 function newPurchase() {
+  if(!S.suppliers.length)return newMetalPurchase();
+  if(!goldCategories().some(x=>x.active))return modal("Necesitas una categoría de oro",notice("No hay categorías activas","Activa o registra una categoría de oro antes de comprar.","amber")+allowed("settings","Nueva categoría","new-category","plus","primary"));
+  purchaseRowIndex=1;
+  modal("Nueva orden de compra de oro",
+    notice("Compra recibida: ingresa al inventario al confirmar","Los gramos de cada categoría se registran en bodega propia con su ley. La compra crea una cuenta por pagar; el pago al proveedor se registra por separado.","blue")+
+    `<div class="form-grid"><div class="span-2">${select("supplierId","Proveedor",S.suppliers.map(x=>[x.id,x.name]),S.suppliers[0].id)}</div>${field("document","Documento / soporte de compra","text","",'required maxlength="100"')}${field("dueDate","Fecha de vencimiento","date",today(),"required")}</div><div id="purchase-category-rows">${purchaseCategoryRow(0)}</div><div class="actions section-gap">${button("Añadir categoría","add-purchase-row","plus","small")}</div><div id="purchase-order-preview" class="calculator section-gap"></div>`,
+    (b,form,key)=>mutate("purchase.create",{supplierId:b.supplierId,document:b.document,dueDate:b.dueDate,
+      items:$$("[data-purchase-row]",form).map(row=>{const i=row.dataset.purchaseRow;return {categoryId:b["purchaseCategory-"+i],weight:b["purchaseWeight-"+i],unitPrice:b["purchasePrice-"+i]};})},key),"Confirmar compra e ingresar a inventario");
+  const form=$("#modal-form");
+  form.addEventListener("change",event=>{
+    if(event.target.name?.startsWith("purchaseCategory-")){
+      const i=event.target.name.slice("purchaseCategory-".length),category=goldCategories().find(x=>x.id===event.target.value);
+      if(category)setNumericValue(form.elements["purchasePrice-"+i],Math.round(S.settings.rate.oro*category.purity/1000));
+    }
+    updatePurchaseOrderPreview();
+  });
+  form.addEventListener("input",updatePurchaseOrderPreview);updatePurchaseOrderPreview();
+}
+function newMetalPurchase() {
   if (!S.suppliers.length)
     return modal(
       "Primero registra al proveedor",
@@ -3027,6 +3068,14 @@ function printOrder(id) {
       `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${(o.orderMetals || []).map((x)=>`<p class="receipt-pre">${E(x.name)}: ${cop(x.price)}</p>`).join("")}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
   );
 }
+function printPurchase(id) {
+  const p=find("purchases",id);if(!p)throw new Error("Orden de compra no encontrada.");
+  const supplier=find("suppliers",p.supplierId);
+  showReceipt("Orden de compra · "+p.code,receiptHeader("ORDEN DE COMPRA · METAL RECIBIDO")+
+    `<hr><strong>${E(p.code)}</strong>${p.reversedAt?" · REVERSADA":""}<br>Fecha: ${dt(p.at)}<br>Proveedor: ${E(supplier?.name)}<br>Documento proveedor: ${E(supplier?.document)}<br>Soporte: ${E(p.document)}<br>Vencimiento: ${dateLabel(p.dueDate)}<hr>`+
+    purchaseItems(p).map(item=>`<p class="receipt-pre"><strong>${E(item.categoryName)}</strong><br>${E(item.metal)} · ley ${number(item.purity)}<br>Peso recibido: ${weight(item.mg)}<br>Fino: ${fine(item.mg*item.purity)}<br>Precio por ${p.priceBasis==="gross"?"gramo de la categoría":"gramo fino"}: ${cop(item.unitPrice)}<br>Subtotal: ${cop(item.total)}</p>`).join("<hr>")+
+    `<hr>${row("TOTAL COMPRA",cop(p.total))}${row("SALDO POR PAGAR",cop(purchasePending(p)))}<hr><small>${p.reversedAt?"Compra reversada. Consulta su devolución en el libro de metales.":"La compra ingresó el metal a bodega propia, separado por ley. El pago se registra aparte."}</small><br>Registró: ${E(p.actor)}`);
+}
 function printPayment(id) {
   const p = find("payments", id),
     o = find("orders", p.orderId);
@@ -3069,6 +3118,8 @@ async function exportData(type, id) {
   const from = filters.reportFrom || today().slice(0, 7) + "-01",
     to = filters.reportTo || today(),
     inRange = (at) => at && dayKey(at) >= from && dayKey(at) <= to;
+  if(type==="purchases")return excel("ordenes-compra",["Orden","Fecha","Proveedor","Documento","Categoría / metal","Ley","Peso g","Precio por gramo COP","Base del precio","Subtotal COP","Total orden COP","Saldo pendiente COP","Vencimiento","Estado"],
+    S.purchases.flatMap(p=>purchaseItems(p).map((item,index)=>[p.code,window.TallerExcel.date(p.at),find("suppliers",p.supplierId)?.name,p.document,item.categoryName,item.purity,item.mg/1000,item.unitPrice,p.priceBasis==="gross"?"Gramo recibido de la categoría":"Gramo fino",item.total,index===0?p.total:null,index===0?purchasePending(p):null,window.TallerExcel.date(p.dueDate),p.reversedAt?"Reversada":"Recibida · inventario ingresado"])));
   if (type === "ledger") {
     const f = filters;
     if (f.ledgerFrom && f.ledgerTo && f.ledgerFrom > f.ledgerTo) throw new Error("La fecha inicial no puede superar la fecha final.");
@@ -3396,6 +3447,21 @@ async function handleAction(action, id, el) {
     case "edit-supplier":
       supplierModal(id);
       break;
+    case "add-purchase-row":
+      if($$("[data-purchase-row]").length>=50)throw new Error("Puedes añadir hasta 50 categorías por compra.");
+      $("#purchase-category-rows").insertAdjacentHTML("beforeend",purchaseCategoryRow(purchaseRowIndex++));
+      updatePurchaseOrderPreview();
+      break;
+    case "remove-purchase-row":
+      if($$("[data-purchase-row]").length<=1)throw new Error("La compra necesita al menos una categoría.");
+      el.closest("[data-purchase-row]").remove();updatePurchaseOrderPreview();
+      break;
+    case "print-purchase":
+      printPurchase(id);
+      break;
+    case "new-metal-purchase":
+      newMetalPurchase();
+      break;
     case "new-purchase":
       newPurchase();
       break;
@@ -3673,7 +3739,7 @@ async function handleAction(action, id, el) {
         pending =
           p.total -
           S.supplierPayments
-            .filter((x) => x.purchaseId === id)
+            .filter((x) => x.purchaseId === id && !x.reversedAt)
             .reduce((v, x) => v + x.amount, 0);
       simpleModal(
         "Pago proveedor · " + p.code,

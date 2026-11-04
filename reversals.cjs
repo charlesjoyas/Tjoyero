@@ -29,7 +29,8 @@ module.exports = function reverse(s, b, a, D) {
     case "purchase": {
       const p=get(s,"purchases",b.id);live(p);
       assert(!s.supplierPayments.some(x=>x.purchaseId===p.id&&!x.reversedAt),"Reversa primero los pagos de esta compra.");
-      move(s,a,"own","proveedor",p.mg,p.metal,p.purity,"taller",ref,reason);
+      for(const item of p.items||[{metal:p.metal,purity:p.purity,mg:p.mg}])
+        move(s,a,"own","proveedor",item.mg,item.metal,item.purity,"taller",ref,reason);
       mark(p);record.summary="Compra "+p.code+" reversada; metal devuelto al proveedor.";
       break;
     }

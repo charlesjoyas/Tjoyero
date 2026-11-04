@@ -1332,12 +1332,27 @@ function execute(s, action, b, a) {
     case "purchase.create": {
       permit(a, "purchases");
       get(s, "suppliers", b.supplierId);
-      const m = metal(b.metal, s),
-        p = purity(b.purity),
-        mg = grams(b.weight),
-        unit = money(b.rate, "Precio por gramo fino");
-      assert(unit > 0, "El precio debe ser mayor a cero.");
-      const value = metalValue(mg, p, unit);
+      let items, m, p, mg, unit, value;
+      if(b.items!==undefined){
+        assert(Array.isArray(b.items)&&b.items.length>0&&b.items.length<=50,"Añade entre una y 50 categorías a la orden de compra.");
+        const categories=s.settings.goldCategories||defaultGoldCategories();
+        items=b.items.map(input=>{
+          assert(input&&typeof input==="object","Detalle de compra inválido.");
+          const category=categories.find(x=>x.id===input.categoryId);
+          assert(category&&category.active,"La categoría de oro no existe o está inactiva. Actualiza la orden.");
+          const weight=grams(input.weight),price=money(input.unitPrice,"Precio por gramo de la categoría");
+          assert(price>0,"El precio por gramo debe ser mayor a cero.");
+          let total;try{total=Numbers.weightPrice(weight,price);}catch(error){fail(error.message);}
+          assert(total>0,"El valor de cada categoría debe ser al menos un peso.");
+          return {categoryId:category.id,categoryName:category.name,metal:"oro",purity:category.purity,mg:weight,unitPrice:price,total};
+        });
+        m="oro";p=items[0].purity;mg=items.reduce((sum,x)=>sum+x.mg,0);unit=items[0].unitPrice;
+        assert(mg<=1000000000,"El peso total de la compra no puede superar 1.000.000 g.");
+        value=money(items.reduce((sum,x)=>sum+x.total,0),"Total de la orden de compra");
+      }else{
+        m=metal(b.metal,s);p=purity(b.purity);mg=grams(b.weight);unit=money(b.rate,"Precio por gramo fino");
+        assert(unit>0,"El precio debe ser mayor a cero.");value=metalValue(mg,p,unit);
+      }
       const x = {
         id: id(),
         code: seq(s, "purchase", "CP"),
@@ -1352,24 +1367,15 @@ function execute(s, action, b, a) {
         dueDate: date(b.dueDate),
         actor: a.name,
       };
+      if(items){x.items=items;x.priceBasis="gross";}
       assert(
         !s.purchases.some(
           (y) => !y.reversedAt && y.supplierId === x.supplierId && y.document === x.document,
         ),
         "Este documento de compra ya fue registrado.",
       );
-      move(
-        s,
-        a,
-        "proveedor",
-        "own",
-        mg,
-        m,
-        p,
-        "taller",
-        x.code,
-        "Compra " + x.document,
-      );
+      for(const item of items||[{metal:m,purity:p,mg}])
+        move(s,a,"proveedor","own",item.mg,item.metal,item.purity,"taller",x.code,"Compra "+x.document+(item.categoryName?" · "+item.categoryName:""));
       s.purchases.push(x);
       return x;
     }
@@ -1963,6 +1969,17 @@ function validateState(s) {
   for (const p of s.purchases) {
     assert(suppliers.has(p.supplierId), "Compra sin proveedor.");
     money(p.total, "Total de compra");
+    if(p.items!==undefined){
+      assert(Array.isArray(p.items)&&p.items.length>0&&p.items.length<=50&&p.priceBasis==="gross"&&p.metal==="oro","Detalle de orden de compra inválido.");
+      for(const item of p.items){
+        assert(item&&item.metal==="oro"&&typeof item.categoryId==="string"&&item.categoryId.length>0&&item.categoryId.length<=100,"Categoría de compra inválida.");
+        str(item.categoryName,"Categoría histórica",80);purity(item.purity);money(item.unitPrice,"Precio por gramo");
+        assert(Number.isSafeInteger(item.mg)&&item.mg>0&&item.mg<=1000000000&&item.unitPrice>0,"Peso o precio de compra inválido.");
+        let calculated;try{calculated=Numbers.weightPrice(item.mg,item.unitPrice);}catch(error){fail(error.message);}
+        assert(calculated===item.total&&item.total>0,"El importe por categoría no corresponde al peso y precio.");
+      }
+      assert(Number.isSafeInteger(p.mg)&&p.mg<=1000000000&&p.items.reduce((sum,item)=>sum+item.mg,0)===p.mg&&p.items.reduce((sum,item)=>sum+item.total,0)===p.total&&p.purity===p.items[0].purity&&p.rate===p.items[0].unitPrice,"Los detalles no concilian con el total de compra.");
+    }
     assert(
       s.supplierPayments
         .filter((x) => x.purchaseId === p.id && !x.reversedAt)

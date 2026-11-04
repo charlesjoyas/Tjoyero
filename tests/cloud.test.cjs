@@ -12,6 +12,20 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: orden de compra por categorías, reintento, inventario, reversión y restauración",async t=>{
+  const f=await fixture(t);
+  await f.request("/api/setup",{workshop:"Compras",name:"Admin",username:"admin",password:"1234",setupKey});
+  const supplier=(await f.act("supplier.save",{name:"Proveedor de oro"})).body.result;
+  const body={supplierId:supplier.id,document:"FACT-CATEGORIAS",dueDate:"2026-12-01",items:[{categoryId:"gold-18k",weight:2.345,unitPrice:300000},{categoryId:"gold-14k",weight:1.234,unitPrice:200000}]},key=randomUUID();
+  const before=await f.state();assert.equal((await f.act("purchase.create",{...body,items:[body.items[0],{...body.items[1],categoryId:"no-existe"}]})).status,400);assert.deepEqual(await f.state(),before);
+  const created=await f.act("purchase.create",body,key);assert.equal(created.status,200);assert.equal(created.body.result.total,950300);
+  const received=await f.state();assert.equal(received.ledger.length,before.ledger.length+2);assert.equal(received.cashEntries.length,before.cashEntries.length);
+  assert.equal((await f.act("purchase.create",body,key)).status,200);assert.deepEqual(await f.state(),received);await f.open();assert.deepEqual(await f.state(),received);
+  const backup=(await f.request("/api/backup")).body;
+  assert.equal((await f.act("operation.reverse",{type:"purchase",id:created.body.result.id,reason:"Devolución comprobada",confirmed:true})).status,200);
+  assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);const restored=await f.state();assert.deepEqual(restored.purchases,received.purchases);assert.deepEqual(restored.ledger,received.ledger);
+});
+
 test("Nube: reversión completa de orden en calidad, vista previa bancaria e idempotencia",async t=>{
   const f=await fixture(t);
   await f.request("/api/setup",{workshop:"Reversión completa",name:"Admin",username:"admin",password:"1234",setupKey});

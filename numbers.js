@@ -69,5 +69,12 @@
       throw new Error("El impuesto admite hasta 2 decimales.");
     return Number((BigInt(base) * BigInt(basisPoints) + 5000n) / 10000n);
   }
-  return { format, parse, editing, tax };
+  function weightPrice(mg, price) {
+    if (!Number.isSafeInteger(mg) || mg < 0 || mg > 1e9 || !Number.isSafeInteger(price) || price < 0 || price > 1e12)
+      throw new Error("Revisa el peso y el precio por gramo; usa pesos enteros y hasta tres decimales en gramos.");
+    const value = (BigInt(mg) * BigInt(price) + 500n) / 1000n;
+    if (value > 1000000000000n) throw new Error("El importe supera el máximo de un billón de COP.");
+    return Number(value);
+  }
+  return { format, parse, editing, tax, weightPrice };
 });

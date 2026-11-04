@@ -135,7 +135,7 @@ const { createApp } = require("../server.cjs");
     await page.locator("#dialog [name=name]").fill("Refinadora de prueba");
     await page.locator("[name=document]").fill("900001");
     await submit();
-    await click("new-purchase");
+    await click("new-metal-purchase");
     await page.locator("[name=document]").fill("FA-100");
     await page.locator("[name=purity]").fill("1000");
     await page.locator("[name=weight]").fill("1");
