@@ -1049,12 +1049,17 @@ function setOrderMetals(form, items) {
   dirty = true;
   quotePreview(form);
 }
+function budgetMetalOptions(current="") {
+  const options=[...goldCategories().filter(x=>x.active).map(x=>[x.name,x.name+" · ley "+number(x.purity)]),...metals().filter(x=>x.id!=="oro").map(x=>[x.name,x.name])];
+  if(current&&!options.some(x=>x[0]===current))options.push([current,current+" (registrado anteriormente)"]);
+  return [["","Seleccionar metal / categoría"],...options];
+}
 function orderMetalModal(id) {
   const form = $("#receive-form");
   if (!form) return;
   const items = JSON.parse(form.elements.orderMetals.value || "[]");
   const item = items.find((x)=>x.id===id);
-  modal(item ? "Editar metal de esta orden" : "Añadir metal al presupuesto", `<p class="muted">Escribe el metal que el taller le vende al cliente y su precio total para este trabajo.</p><div class="form-grid section-gap"><div class="span-2">${field("name","Metal / descripción","text",item?.name || "",'required maxlength="120" placeholder="Ej. Oro 18k, plata o el metal acordado"')}</div><div class="span-2">${moneyField("price","Precio total de este metal · COP",item?.price ?? 0)}</div><p class="muted span-2">Se suma una sola vez al total de metal vendido de esta orden. No cambia el catálogo, las tarifas ni el inventario general.</p></div>`, (b)=>{
+  modal(item ? "Editar metal de esta orden" : "Añadir metal al presupuesto", `<p class="muted">Selecciona el metal o una categoría registrada y su precio total para este trabajo.</p><div class="form-grid section-gap"><div class="span-2">${select("name","Metal / categoría",budgetMetalOptions(item?.name),item?.name || "")}</div><div class="span-2">${moneyField("price","Precio total de este metal · COP",item?.price ?? 0)}</div><p class="muted span-2">Se suma una sola vez al total de metal vendido de esta orden. No cambia el catálogo, las tarifas ni el inventario general.</p></div>`, (b)=>{
     if (!item && items.length >= 50) throw new Error("Puedes detallar hasta 50 metales por orden.");
     const price = Number(b.price);
     if (!Number.isSafeInteger(price) || price < 0 || price > 1e12) throw new Error("Precio total del metal inválido.");
@@ -1068,7 +1073,7 @@ function removeOrderMetal(id) {
   setOrderMetals(form,items.filter((x)=>x.id!==id));
 }
 function inlineOrderMetal(x) {
-  return `<section class="span-2" data-order-metal-row="${E(x.id)}"><div class="form-grid">${field("orderMetalName-"+x.id,"Metal / descripción","text",x.name,'required maxlength="120"')}${moneyField("orderMetalPrice-"+x.id,"Precio total · COP",x.price)}<div class="span-2">${button("Quitar metal","remove-inline-metal","","small danger",x.id)}</div></div></section>`;
+  return `<section class="span-2" data-order-metal-row="${E(x.id)}"><div class="form-grid">${select("orderMetalName-"+x.id,"Metal / categoría",budgetMetalOptions(x.name),x.name)}${moneyField("orderMetalPrice-"+x.id,"Precio total · COP",x.price)}<div class="span-2">${button("Quitar metal","remove-inline-metal","","small danger",x.id)}</div></div></section>`;
 }
 function readInlineMetals(form) {
   return $$("[data-order-metal-row]",form).map((row)=>({id:row.dataset.orderMetalRow,name:$("[name^=orderMetalName-]",row).value.trim(),price:numericValue($("[name^=orderMetalPrice-]",row))}));
