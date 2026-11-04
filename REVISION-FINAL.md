@@ -4,6 +4,8 @@ La revisión se ejecutó con bases de datos temporales y usuarios ficticios. No 
 
 ## Piedras preciosas — implementación y verificación
 
+Actualización de recepción: el presupuesto ahora permite seleccionar, editar y quitar piedras del taller antes de crear la orden. El precio total modifica el presupuesto y el impuesto una sola vez, conservando otros insumos. El guardado es atómico e idempotente junto con la salida de inventario. Se verificaron también permisos de recepción, varios lotes, falta de existencias, cambios de precio y conservación del borrador de piedras del cliente al cerrar los modales. Se corrigió el desbordamiento móvil de la nueva tabla. Se repitieron las pruebas completas de Node y los recorridos de gemas, recepción general, pérdida de respuesta, metales, mano de obra, formato numérico y responsive.
+
 - Inventario propio por piedra individual o lote: unidades, quilates, costo, precio, talla, medidas, certificado y fotografía. Custodia del cliente separada, sin contabilizarla como patrimonio o venta.
 - Salidas a trabajos, montaje y desmontaje, recuperación física, devolución al cliente e incidentes. No se aprueba calidad con piedras pendientes; la pérdida de una piedra del cliente exige constancia del incidente y comunicación.
 - Peso bruto recibido separado del metal neto. Un peso pendiente o estimado no genera oro en el libro; asignar requiere confirmar el neto y detallar la custodia.
@@ -26,7 +28,7 @@ Se corrigieron tres problemas reproducidos durante esta revisión:
 
 Evidencia final:
 
-- 112 pruebas de Node aprobadas; ninguna falla o prueba omitida.
+- 115 pruebas de Node aprobadas; ninguna falla o prueba omitida.
 - 20 recorridos de navegador aprobados. Incluyen piedras preciosas, los últimos módulos, funcionamiento sin recursos externos, pérdidas de conexión y recuperación, exportaciones reales y PDF en Chrome/Edge.
 - 20 vistas en anchos de 1440, 1024, 768, 390, 360 y 320 píxeles, sin desbordamientos ni errores de ejecución.
 - Simulación nueva de diez jornadas: 606 operaciones, 53 órdenes, 30 compras, 59 eliminaciones y 99 reversiones. Se concilian después de cada operación los metales y propietarios, mesas, custodias, lotes, insumos, efectivo y valoración. Los diez cierres permanecen intactos. Efectivo final comprobado: 1.363.000 COP.

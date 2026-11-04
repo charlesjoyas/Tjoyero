@@ -58,7 +58,7 @@ function returnStone(s,o,x,b,a,D) {
   }
   transition(x,"returned",a,D,reason);D.timeline(o,a,"Piedras físicamente recuperadas y devueltas: "+x.name+". "+reason);
 }
-function execute(s,action,b,a,D) {
+function execute(s,action,b,a,D,options={}) {
   if(action==="gem.lot") {
     D.permit(a,"inventory");
     const quantity=integer(b.quantity,"Cantidad de piedras",D,1,1000000), ct=carats(b.carats,D);
@@ -85,7 +85,7 @@ function execute(s,action,b,a,D) {
   if(action==="gem.add") {
     const owner=b.owner;
     D.assert(["cliente","taller"].includes(owner),"Selecciona de quién es la piedra.");
-    D.permit(a,owner==="cliente"?"orders":"production");
+    D.permit(a,owner==="cliente"||options.reception===true?"orders":"production");
     D.assert(["received","in_progress"].includes(o.status),"Añade piedras antes del retorno de producción.");
     D.assert((o.stones||[]).length<200,"Máximo 200 líneas de piedras por trabajo.");
     const quantity=integer(b.quantity,"Cantidad de piedras",D,1,1000000);

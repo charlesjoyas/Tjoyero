@@ -12,6 +12,17 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: recepción con piedras es atómica e idempotente, sin duplicar precio ni inventario",async t=>{
+ const f=await fixture(t);await f.request("/api/setup",{workshop:"Recepción",name:"Admin",username:"admin",password:"1234",setupKey});
+ const client=(await f.act("client.save",{name:"Cliente"})).body.result,lot=(await f.act("gem.lot",{name:"Esmeralda",quantity:1,carats:.5,cost:100000,unitPrice:180000})).body.result;
+ const payload={clientId:client.id,type:"Reparación",description:"Anillo",condition:"Sin piedras recibidas",metal:"oro",purity:750,receivedWeight:2,dueDate:"2026-12-01",materialPrice:185000,labor:10000,taxPercent:19,ownStones:[{stockId:lot.id,quantity:1,carats:.5,price:180000}]},before=await f.state();
+ const failed=await f.act("order.create",{...payload,ownStones:[...payload.ownStones,{stockId:"inexistente",quantity:1,carats:1,price:0}]});assert.equal(failed.status,400);assert.deepEqual(await f.state(),before);
+ const key=randomUUID(),created=await f.act("order.create",payload,key);assert.equal(created.status,200);assert.equal(created.body.result.materialPrice,185000);assert.equal(created.body.result.tax,37050);
+ const saved=await f.state();assert.equal(saved.gemstoneLots[0].available,0);assert.equal(saved.orders[0].stones.length,1);
+ await f.open();assert.equal((await f.act("order.create",payload,key)).status,200);assert.deepEqual(await f.state(),saved);
+ assert.equal((await f.act("order.create",payload)).status,400);assert.deepEqual(await f.state(),saved);
+});
+
 test("Nube: piedras, fotos, stock y custodia sobreviven reintentos, reversión y restauración",async t=>{
  const f=await fixture(t);await f.request("/api/setup",{workshop:"Gemas",name:"Admin",username:"admin",password:"1234",setupKey});
  const act=async(action,b,key)=>{const r=await f.act(action,b,key);assert.equal(r.status,200,JSON.stringify(r.body));return r.body.result;};

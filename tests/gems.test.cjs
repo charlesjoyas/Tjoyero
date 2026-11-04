@@ -105,3 +105,17 @@ test("Gemas: cuarenta salidas, costos impares y recuperaciones mantienen conserv
  for(const [orderId,id]of ids.reverse())f.act("gem.return",{orderId,id,confirmed:true,reason:"Contada y pesada al recuperar"});
  assert.equal(f.s.gemstoneLots[0].available,40);assert.equal(f.s.gemstoneLots[0].remainingCaratMilli,4017);assert.equal(f.s.gemstoneLots[0].remainingCost,1000000000000);
 });
+test("Recepción: varias piedras propias se descuentan juntas y su precio se incluye una sola vez con impuesto",()=>{
+ const f=fixture(),lot=f.lot(),second=f.lot({name:"Rubí",quantity:1,carats:.5,cost:100000});
+ const o=f.order({materialPrice:200000,ownStones:[{stockId:lot.id,quantity:1,carats:.4,price:60000},{stockId:second.id,quantity:1,carats:.5,price:130000}]});
+ assert.equal(o.stones.length,2);assert.equal(o.materialPrice,200000);assert.equal(o.tax,39900);assert.equal(D.total(o),249900);assert.equal(f.s.gemstoneLots[0].available,2);assert.equal(f.s.gemstoneLots[1].available,0);
+ const before=structuredClone(f.s);
+ assert.throws(()=>f.order({materialPrice:60000,ownStones:[{stockId:lot.id,quantity:1,carats:.4,price:60000},{stockId:second.id,quantity:1,carats:.5,price:0}]}),/suficientes/);assert.deepEqual(f.s,before);
+ assert.throws(()=>f.order({materialPrice:0,ownStones:[{stockId:lot.id,quantity:1,carats:.4,price:60000}]}),/incluir el precio/);assert.deepEqual(f.s,before);
+});
+test("Recepción: recepción puede seleccionar piedras al crear el trabajo, sin obtener permisos generales de producción",()=>{
+ const f=fixture(),lot=f.lot(),reception={name:"Recepción",role:"recepcion"},clientId=f.s.clients[0].id;
+ const o=f.act("order.create",{clientId,type:"Reparación",description:"Trabajo",condition:"Recibido",metal:"oro",purity:750,receivedWeight:2,dueDate:"2026-12-01",materialPrice:60000,ownStones:[{stockId:lot.id,quantity:1,carats:.4,price:60000}]},reception);
+ assert.equal(o.stones.length,1);assert.equal(o.stones[0].actor,reception.name);
+ assert.throws(()=>f.act("gem.add",{orderId:o.id,owner:"taller",stockId:lot.id,quantity:1,carats:.4,price:60000,reception:true},reception),/no permite/);
+});

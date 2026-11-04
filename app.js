@@ -971,6 +971,39 @@ function ordersPage() {
     }</section>`
   );
 }
+function receptionStoneWeightFields() {
+  return `<div class="span-2" id="receive-stone-controls"><label class="check"><input name="hasStones" type="checkbox">La joya del cliente trae piedras.</label><div class="form-grid" id="receive-stone-weights" hidden>${weightField("grossWeight","Peso bruto de la joya, con piedras (g)","")}${select("weightStatus","Peso neto del metal",[["pending","Pendiente de pesar"],["estimated","Estimado; no ingresa al libro"],["confirmed","Pesado y confirmado"]],"pending")}<p class="muted span-2">Registra el detalle de las piedras del cliente en la ficha del trabajo. Un peso neto pendiente o estimado no entra como oro ni permite asignar a mesa.</p></div></div>`;
+}
+function receptionOwnStonesControls() {
+  return `<div class="span-2 form-section" id="receive-own-stones-section"><h3>Piedras que aporta el taller (opcional)</h3><p>Selecciona tus piedras disponibles y su precio total para este trabajo. Se suman al presupuesto y se descuentan del inventario al guardar la orden.</p><div class="actions">${button("Añadir piedra del taller","receive-own-gem","gem","small")}</div><input type="hidden" name="ownStones" value="[]"><div id="receive-own-stones"></div></div>`;
+}
+function receptionStonesTable(items) {
+  return items.length?table(["Piedra del taller","Unidades / quilates","Precio total incluido",""],items.map(x=>tr([E(x.name),number(x.quantity)+" · "+ctLabel(x.caratMilli),cop(x.price),button("Editar","edit-receive-gem","","small",x.id)+button("Quitar","remove-receive-gem","","small danger",x.id)])).join("")):"";
+}
+function setReceptionStones(form,items) {
+  const old=JSON.parse(form.elements.ownStones.value||"[]"),oldTotal=old.reduce((v,x)=>v+x.price,0),newTotal=items.reduce((v,x)=>v+x.price,0),current=numericValue(form.elements.materialPrice);
+  if(current<oldTotal)throw new Error("Piedras e insumos debe incluir las piedras ya seleccionadas. Revisa ese importe antes de cambiar el detalle.");
+  if(!Number.isSafeInteger(newTotal)||current-oldTotal+newTotal>1e12)throw new Error("El precio de las piedras supera el máximo permitido.");
+  form.elements.ownStones.value=JSON.stringify(items);setNumericValue(form.elements.materialPrice,current-oldTotal+newTotal);dirty=true;quotePreview(form);
+}
+function receptionGemModal(id) {
+  const reception=$("#receive-form"),items=JSON.parse(reception.elements.ownStones.value||"[]"),item=items.find(x=>x.id===id);
+  const lots=(S.gemstoneLots||[]).filter(x=>!x.reversedAt&&!x.deletedAt).map(x=>{const selected=items.filter(y=>y.id!==id&&y.stockId===x.id);return {...x,available:x.available-selected.reduce((v,y)=>v+y.quantity,0),remainingCaratMilli:x.remainingCaratMilli-selected.reduce((v,y)=>v+y.caratMilli,0)};}).filter(x=>x.available>0);
+  if(!lots.length)return modal("Sin piedras propias disponibles",notice("Registra tus piedras","En Piedras e insumos registra primero un lote o una piedra del taller. Las piedras seleccionadas en este formulario también se tienen en cuenta al mostrar la disponibilidad.","amber"));
+  modal(item?"Editar piedra del presupuesto":"Añadir piedra del taller al trabajo",notice("Precio incluido en el presupuesto","Selecciona la piedra, las unidades, sus quilates totales y el precio total acordado para esta línea. El precio sugerido se puede modificar. El inventario se descuenta al guardar la orden completa.","blue")+`<div class="form-grid"><div class="span-2">${select("stockId","Piedra / lote disponible",lots.map(x=>[x.id,x.code+" · "+x.name+" · "+number(x.available)+" und. · "+ctLabel(x.remainingCaratMilli)]),item?.stockId||lots[0].id)}</div>${field("quantity","Cantidad de piedras","number",item?.quantity||1,'required min="1" max="1000000" step="1"')}${field("carats","Quilates totales de esta línea · ct","number",item?item.caratMilli/1000:"",'required min="0.001" max="1000000" step="0.001"')}<div class="span-2">${moneyField("price","Precio total de estas piedras · COP",item?.price||0)}</div></div>`,b=>{
+    if(!item&&items.length>=200)throw new Error("Máximo 200 líneas de piedras por orden.");
+    const lot=lots.find(x=>x.id===b.stockId),qty=Number(b.quantity),ct=Number(b.carats)*1000,price=Number(b.price);
+    if(!lot||!Number.isSafeInteger(qty)||qty<1||qty>lot.available)throw new Error("Revisa las unidades disponibles de esta piedra.");
+    if(!Number.isFinite(ct)||Math.abs(ct-Math.round(ct))>.00001||ct<qty||ct>lot.remainingCaratMilli||lot.remainingCaratMilli-Math.round(ct)<lot.available-qty||(qty===lot.available&&Math.round(ct)!==lot.remainingCaratMilli))throw new Error("Revisa los quilates: deben corresponder a las piedras retiradas y conservar el saldo del lote.");
+    if(!Number.isSafeInteger(price)||price<0||price>1e12)throw new Error("Precio total de las piedras inválido.");
+    const next={id:item?.id||crypto.randomUUID(),stockId:lot.id,name:lot.code+" · "+lot.name,quantity:qty,caratMilli:Math.round(ct),carats:Math.round(ct)/1000,price};
+    setReceptionStones(reception,item?items.map(x=>x.id===id?next:x):[...items,next]);
+  },"Añadir al presupuesto");
+  const form=$("#modal-form"),update=()=>{const lot=lots.find(x=>x.id===form.elements.stockId.value);setNumericValue(form.elements.quantity,1);setNumericValue(form.elements.carats,lot.available===1?lot.remainingCaratMilli/1000:"");setNumericValue(form.elements.price,lot.unitPrice);};
+  form.elements.stockId.addEventListener("change",update);
+  form.elements.quantity.addEventListener("input",()=>{const lot=lots.find(x=>x.id===form.elements.stockId.value);setNumericValue(form.elements.price,lot.unitPrice*numericValue(form.elements.quantity));});
+  if(!item)update();
+}
 function receivePage() {
   if (!can("orders")) return notice("Acceso restringido");
   return (
@@ -989,7 +1022,7 @@ function receivePage() {
         )) +
     formWrap(
       "receive-form",
-      `<div class="grid two"><section class="card"><div class="card-head"><div><h2 id="reception-owner-title">1. Lo que trae el cliente</h2><p id="reception-owner-help">Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${weightField("receivedWeight", "Peso recibido en custodia (g)", 0, true)}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2 id="reception-budget-title">2. Lo que le cobras al cliente</h2><p id="reception-budget-help">Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
+      `<div class="grid two"><section class="card"><div class="card-head"><div><h2 id="reception-owner-title">1. Lo que trae el cliente</h2><p id="reception-owner-help">Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${weightField("receivedWeight", "Peso neto del metal recibido, sin piedras (g)", 0, true)}${receptionStoneWeightFields()}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2 id="reception-budget-title">2. Lo que le cobras al cliente</h2><p id="reception-budget-help">Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${receptionOwnStonesControls()}${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
       "Registrar orden y abrir detalle",
     )
   );
@@ -1043,6 +1076,8 @@ function quotePreview(form) {
   }
   const metalsList = $("#order-metal-list", form);
   if (metalsList) metalsList.innerHTML = orderMetalsTable(JSON.parse(form.elements.orderMetals.value || "[]"), true);
+  const stonesList=$("#receive-own-stones",form);
+  if(stonesList)stonesList.innerHTML=receptionStonesTable(JSON.parse(form.elements.ownStones.value||"[]"));
 }
 function orderMetalsTable(items, editable = false) {
   if (!items.length) return "";
@@ -2969,9 +3004,6 @@ function bindPage() {
   $$("form").forEach(syncMetalFields);
   const f = $("#receive-form");
   if (f) {
-    const net=f.elements.receivedWeight;
-    net.closest(".field").querySelector("span").textContent="Peso neto del metal recibido, sin piedras (g)";
-    net.closest(".weight-control").insertAdjacentHTML("afterend",`<div class="span-2" id="receive-stone-controls"><label class="check"><input name="hasStones" type="checkbox">La joya del cliente trae piedras.</label><div class="form-grid" id="receive-stone-weights" hidden>${weightField("grossWeight","Peso bruto de la joya, con piedras (g)","")}${select("weightStatus","Peso neto del metal",[["pending","Pendiente de pesar"],["estimated","Estimado; no ingresa al libro"],["confirmed","Pesado y confirmado"]],"pending")}<p class="muted span-2">Registra el detalle de las piedras en la ficha del trabajo. Un peso neto pendiente o estimado no entra como oro ni permite asignar a mesa.</p></div></div>`);
     f.elements.hasStones.addEventListener("change",()=>updateReceptionType(f));
     updateReceptionType(f);
     quotePreview(f);
@@ -2987,6 +3019,7 @@ function bindPage() {
         if (b.laborEstimate) b.laborEstimate = JSON.parse(b.laborEstimate);
         else delete b.laborEstimate;
         b.orderMetals = JSON.parse(b.orderMetals || "[]");
+        b.ownStones=JSON.parse(b.ownStones||"[]");
         b.hasStones=!!b.hasStones;
         if (photoPromise) await photoPromise;
         delete b.photo;
@@ -3502,6 +3535,9 @@ async function handleAction(action, id, el) {
       route("orders", id);
       break;
     case "new-gem":newGemModal();break;
+    case "receive-own-gem":receptionGemModal();break;
+    case "edit-receive-gem":receptionGemModal(id);break;
+    case "remove-receive-gem":{const f=$("#receive-form");setReceptionStones(f,JSON.parse(f.elements.ownStones.value||"[]").filter(x=>x.id!==id));break;}
     case "gem-weight":gemWeightModal(id);break;
     case "gem-customer":addGemModal(id,"cliente");break;
     case "gem-own":addGemModal(id,"taller");break;

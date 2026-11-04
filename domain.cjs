@@ -544,8 +544,18 @@ function execute(s, action, b, a) {
           x.code,
           "Recepción en custodia; propiedad del cliente",
         );
-      timeline(x, a, "Orden recibida; presupuesto " + total(x) + " COP.");
+      const receptionStones=b.ownStones??[];
+      assert(Array.isArray(receptionStones)&&receptionStones.length<=200,"Añade hasta 200 líneas de piedras propias al recibir el trabajo.");
+      const stonesPrice=money(receptionStones.reduce((sum,item)=>{
+        assert(item&&typeof item==="object","Piedra del presupuesto inválida.");
+        return sum+money(item.price,"Precio total de la piedra");
+      },0),"Total de piedras del taller");
+      assert(x.materialPrice>=stonesPrice,"Piedras e insumos debe incluir el precio de todas las piedras seleccionadas.");
+      x.materialPrice-=stonesPrice;
+      x.tax=taxAmount(x.labor+x.materialPrice+x.goldPrice,x.taxPercent);
       s.orders.push(x);
+      for(const item of receptionStones)Gems.execute(s,"gem.add",{...item,owner:"taller",orderId:x.id},a,gemTools(),{reception:true});
+      timeline(x, a, "Orden recibida; presupuesto " + total(x) + " COP.");
       return x;
     }
     case "order.edit": {

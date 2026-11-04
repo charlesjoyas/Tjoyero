@@ -7,6 +7,8 @@
   display: none !important;
 }
 #order-metal-list,
+#receive-own-stones-section,
+#receive-own-stones,
 #edit-order-metals {
   min-width: 0;
   max-width: 100%;
