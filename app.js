@@ -1006,6 +1006,17 @@ function updateReceptionType(form) {
   capture.disabled=own;capture.closest(".field").hidden=own;
   form.elements.clientId.required = !own;
   form.elements.clientId.disabled = own;
+  const stoneControls=$("#receive-stone-controls",form);
+  if(stoneControls) {
+    stoneControls.hidden=own;
+    const enabled=!own&&form.elements.hasStones.checked;
+    form.elements.hasStones.disabled=own;
+    $("#receive-stone-weights",form).hidden=!enabled;
+    form.elements.grossWeight.required=enabled;
+    form.elements.grossWeight.disabled=!enabled;
+    form.elements.weightStatus.disabled=!enabled;
+    if(own)form.elements.hasStones.checked=false;
+  }
   if (own) {
     setNumericValue(form.elements.receivedWeight, 0);
     form.elements.receivedWeight.readOnly = true;
@@ -1250,7 +1261,7 @@ function orderDetail(o) {
   if (ret) {
     production += PM.groups(o).map(g=>row(E(g.metal)+" · ley "+number(g.purity)+" · pieza / limalla",weight(g.indexes.reduce((sum,i)=>sum+ret.pieces[i],0))+" / "+weight(g.indexes.reduce((sum,i)=>sum+ret.scraps[i],0)))).join("");
     production +=
-      row("Pieza terminada", weight(ret.pieceMg)) +
+      row("Metal neto en pieza terminada", weight(ret.pieceMg)) +
       row("Limalla recuperada", weight(ret.scrapMg)) +
       row(
         "Merma definitiva",
@@ -1399,6 +1410,7 @@ function orderDetail(o) {
       "Propiedad separada durante todo el proceso.",
       production,
     ) +
+    orderStonesCard(o) +
     (o.materialUsage.filter(x=>!x.deletedAt).length
       ? card(
           "Piedras e insumos utilizados",
@@ -1945,6 +1957,59 @@ function purchasesPage() {
     )}</div>`
   );
 }
+const stoneStatuses={held:"Pendiente de montar / devolver",mounted:"Montada en la pieza",returned:"Devuelta físicamente",delivered:"Entregada en la pieza",lost:"Pérdida documentada"};
+const ctLabel=x=>x===null?"Quilates sin determinar":number(x/1000,3)+" ct";
+function stoneInventory() {
+  const lots=(S.gemstoneLots||[]).filter(x=>!x.deletedAt);
+  return card("Piedras preciosas del taller","Existencias propias. Las piedras del cliente se registran en su orden y nunca aumentan este inventario.",
+    `<div class="actions">${allowed("inventory","Registrar lote o piedra","new-gem","plus","primary")}${button("Excel de piedras","export-gems","download")}${button("Piedras por trabajo","export-gem-orders","download")}</div>`+
+    row("Costo disponible en bodega",cop(lots.reduce((sum,x)=>sum+x.remainingCost,0)))+
+    table(["Código / piedra","Disponibles","Quilates disponibles","Costo disponible","Precio sugerido / unidad",""],lots.map(x=>tr([`<strong>${E(x.code)} · ${E(x.name)}</strong><small>${E(x.individual?"Piedra individual":"Lote")}${x.certificate?" · "+E(x.certificate):""}</small>`,number(x.available),ctLabel(x.remainingCaratMilli),cop(x.remainingCost),cop(x.unitPrice),button("Ficha","gem-lot-detail","","small",x.id)+(x.reversedAt?reversalBadge(x):reversalButton("gemLot",x.id))])).join(""),"Registra piedras con sus quilates y costo. Se descuentan al añadirlas a una orden."));
+}
+function stoneReceipt(o) {
+  if(!(o.stones||[]).length&&!o.gemWeight)return "";
+  return "<hr><strong>PIEDRAS DEL TRABAJO</strong>"+(o.gemWeight?row("Peso bruto recibido",weight(o.gemWeight.grossMg))+row("Peso neto del metal",o.gemWeight.status==="confirmed"?weight(o.receivedMg):"Pendiente de confirmar") : "")+
+    (o.stones||[]).map(x=>`<p class="receipt-pre"><strong>${E(x.name)}</strong> · ${x.owner==="cliente"?"Del cliente · custodia":"Del taller"}<br>${number(x.quantity)} unidades · ${E(ctLabel(x.caratMilli))}<br>${E(stoneStatuses[x.status])}${x.certificate?"<br>Certificado: "+E(x.certificate):""}${x.condition?"<br>Estado recibido: "+E(x.condition):""}${x.price?"<br>Precio acordado original: "+cop(x.price):""}</p>`).join("");
+}
+function orderStonesCard(o) {
+  const editable=["received","in_progress"].includes(o.status),change=["received","in_progress","quality"].includes(o.status);
+  const w=o.gemWeight,weightInfo=w?notice("Peso bruto y metal neto separados",`Peso bruto recibido: ${weight(w.grossMg)}. Metal neto: ${weight(w.netMg)} · ${({pending:"pendiente de pesar",estimated:"estimado, sin ingresar al libro",confirmed:"confirmado e ingresado al libro"})[w.status]}. Las piedras no se contabilizan como oro.`,w.status==="confirmed"?"blue":"amber"):"";
+  return card("Piedras de este trabajo","Una línea por piedra individual o grupo con el mismo destino. Los precios de piedras propias se suman una sola vez a Piedras e insumos.",weightInfo+
+    `<div class="actions">${o.status==="received"&&o.type!=="Producción propia"?allowed("orders",w?"Revisar peso neto":"Joya con piedras: registrar pesos","gem-weight","","",o.id):""}${o.status==="received"&&o.type!=="Producción propia"?allowed("orders","Recibir piedras del cliente","gem-customer","plus","",o.id):""}${editable?allowed("production","Añadir piedras del taller","gem-own","plus","",o.id):""}</div>`+
+    table(["Piedra / propietario","Cantidad / peso","Estado","Precio total incluido",""],(o.stones||[]).map(x=>tr([`<strong>${E(x.name)}</strong><small>${x.owner==="cliente"?"Cliente · en custodia":"Taller · descontada de inventario"}</small>`,number(x.quantity)+"<small>"+E(ctLabel(x.caratMilli))+"</small>",badge(stoneStatuses[x.status],x.status==="lost"?"red":x.status==="held"?"amber":""),x.owner==="cliente"?"No se cobra":cop(["returned","lost"].includes(x.status)?0:x.price),`<div class="actions">${button("Ficha","gem-detail","","small",o.id+"|"+x.id)}${change&&["held","mounted"].includes(x.status)?(x.status==="held"&&o.status!=="received"?allowed("production","Montar","gem-mount","","small",o.id+"|"+x.id):"")+(x.status==="mounted"?allowed("production","Desmontar","gem-unmount","","small",o.id+"|"+x.id):"")+allowed("production",x.owner==="taller"?"Recuperar a inventario":"Devolver al cliente","gem-return","","small",o.id+"|"+x.id)+allowed("adjust","Registrar pérdida","gem-loss","","small danger",o.id+"|"+x.id):""}</div>`])).join(""),"Sin piedras registradas para este trabajo."));
+}
+function gemDetailHtml(x) {
+  return row("Piedra",E(x.name))+row("Cantidad",number(x.quantity))+row("Quilates totales",E(ctLabel(x.caratMilli)))+row("Talla",E(x.cut||"Sin registrar"))+row("Medidas",E(x.measurements||"Sin registrar"))+row("Certificado / código",E(x.certificate||"Sin registrar"))+(x.condition?row("Estado recibido",E(x.condition)):"")+`<p class="receipt-pre">${E(x.notes||"")}</p>`+(x.photo?`<img class="photo-preview" src="${E(x.photo)}" alt="Piedra registrada">`:"")+(x.events||[]).map(e=>`<p class="muted">${dt(e.at)} · ${E(e.actor)} · ${E(stoneStatuses[e.to])}<br>${E(e.note)}</p>`).join("");
+}
+function gemFields() {
+  return `${field("name","Tipo / nombre (esmeralda, rubí…)","text","",'required maxlength="160"')}${field("cut","Talla","text","",'maxlength="100"')}${field("measurements","Medidas (ej. 5 × 4 mm)","text","",'maxlength="100"')}${field("certificate","Certificado o código individual","text","",'maxlength="200"')}<div class="span-2">${text("notes","Observaciones")}${field("gemPhoto","Fotografía de la piedra","file","",'accept="image/*"')}</div>`;
+}
+async function gemPhoto(form) {
+  const file=form.elements.gemPhoto?.files[0];if(!file)return undefined;
+  if(!file.type.startsWith("image/")||file.size>20*1024*1024)throw new Error("Selecciona una fotografía de hasta 20 MB.");
+  const bitmap=await createImageBitmap(file);
+  try {const factor=Math.min(1,1000/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(bitmap.width*factor));canvas.height=Math.max(1,Math.round(bitmap.height*factor));canvas.getContext("2d").drawImage(bitmap,0,0,canvas.width,canvas.height);const data=canvas.toDataURL("image/jpeg",.75);if(data.length>=1500000)throw new Error("La fotografía es demasiado grande. Usa una imagen más pequeña.");return data;}finally{bitmap.close();}
+}
+function newGemModal() {
+  modal("Registrar piedras del taller",notice("Entrada de piedras propias","Registra un lote nuevo en cada compra o entrada. El costo es el total del lote; el precio sugerido es por unidad. Este registro no descuenta caja: registra el pago como gasto, si corresponde.","blue")+`<div class="form-grid">${gemFields()}${field("quantity","Cantidad de piedras","number",1,'required min="1" max="1000000" step="1"')}${field("carats","Quilates totales del lote · ct","number","",'required min="0.001" max="1000000" step="0.001"')}${moneyField("cost","Costo total del lote · COP",0)}${moneyField("unitPrice","Precio sugerido por piedra · COP",0)}<label class="check span-2"><input type="checkbox" name="individual">Es una piedra individual identificada (una unidad).</label></div>`,async(b,f,key)=>{delete b.gemPhoto;return mutate("gem.lot",{...b,individual:!!b.individual,photo:await gemPhoto(f)},key);});
+}
+function gemWeightModal(id) {
+  const o=find("orders",id),w=o.gemWeight;
+  modal("Peso de la joya y metal neto · "+o.code,notice("No registres el peso de las piedras como oro","El peso bruto incluye piedras y accesorios. Solo el metal neto confirmado entra a custodia. Si aún no puedes medirlo, déjalo pendiente o estimado y confírmalo antes de asignar a mesa.","amber")+`<div class="form-grid">${weightField("grossWeight","Peso bruto de la joya recibida (g)",w?w.grossMg/1000:"")}${weightField("netWeight","Peso neto del metal, sin piedras (g)",w?w.netMg/1000:o.receivedMg/1000,true)}${select("weightStatus","Comprobación del metal neto",[["pending","Pendiente de pesar"],["estimated","Estimado; no entra al libro"],["confirmed","Pesado y confirmado"]],w?.status||"pending")}<div class="span-2">${field("reason","Cómo se verificó / motivo de la corrección","text","",'required maxlength="1000"')}</div></div>`,(b,f,key)=>mutate("gem.weight",{...b,orderId:id},key),"Guardar pesaje");
+}
+function addGemModal(id,owner) {
+  const o=find("orders",id),own=owner==="taller";
+  if(!own&&!o.gemWeight)return gemWeightModal(id);
+  const lots=(S.gemstoneLots||[]).filter(x=>x.available>0);
+  if(own&&!lots.length)return modal("Sin piedras propias disponibles",notice("Registra primero la entrada","Ve a Piedras e insumos y registra el lote con su cantidad, quilates y costo.","amber"));
+  modal((own?"Añadir piedras del taller":"Recibir piedras del cliente")+" · "+o.code,notice(own?"Esta salida sí descuenta inventario":"Custodia del cliente",own?"Se descuentan unidades, quilates y costo del lote. El precio total se añade a Piedras e insumos del presupuesto. Para destinos distintos, registra líneas separadas.":"Describe el estado y toma una foto. Estas piedras no son patrimonio ni venta del taller. Los quilates pueden quedar sin determinar.","blue")+`<div class="form-grid">${own?select("stockId","Lote / piedra disponible",lots.map(x=>[x.id,x.code+" · "+x.name+" · "+number(x.available)+" und. · "+ctLabel(x.remainingCaratMilli)]),lots[0]?.id):gemFields()}${field("quantity","Cantidad de piedras","number",1,'required min="1" max="1000000" step="1"')}${field("carats","Quilates totales de esta línea · ct","number","",`${own?"required ":""}min="0.001" max="1000000" step="0.001"`)}${own?moneyField("price","Precio total de estas piedras · COP",0):`<div class="span-2">${field("condition","Estado recibido (fisuras, color, engaste…)","text","",'required maxlength="2000"')}</div><label class="check span-2"><input type="checkbox" name="includedInPiece" checked>Incluidas en el peso bruto de la joya recibida.</label><label class="check span-2"><input type="checkbox" name="mounted" checked>Ya vienen montadas en la pieza.</label>`}</div>`,async(b,f,key)=>{delete b.gemPhoto;return mutate("gem.add",{...b,owner,orderId:id,includedInPiece:!!b.includedInPiece,mounted:!!b.mounted,...(!own?{photo:await gemPhoto(f)}:{})},key);},own?"Descontar y añadir al trabajo":"Registrar en custodia");
+  if(own){const f=$("#modal-form"),update=()=>{const lot=lots.find(x=>x.id===f.elements.stockId.value);if(!lot)return;setNumericValue(f.elements.quantity,1);setNumericValue(f.elements.carats,lot.available===1?lot.remainingCaratMilli/1000:"");setNumericValue(f.elements.price,lot.unitPrice);};f.elements.stockId.addEventListener("change",update);update();}
+}
+function stoneActionModal(action,key) {
+  const [orderId,id]=key.split("|"),o=find("orders",orderId),x=o.stones.find(v=>v.id===id),returning=action==="return",loss=action==="loss",unmount=action==="unmount";
+  modal((returning?"Confirmar devolución / recuperación":loss?"Documentar pérdida de piedras":unmount?"Confirmar desmontaje":"Confirmar montaje")+" · "+x.name,
+    notice(returning?"Comprueba físicamente las piedras":loss?"La pérdida no regresa existencias":unmount?"La piedra sigue en custodia del trabajo":"Comprueba el engaste",returning?"Confirma que recuperaste todas las unidades de esta línea, incluso si estaban montadas. Las propias vuelven a bodega y se retira su precio del presupuesto; las del cliente se entregan a su propietario.":loss?"Se conserva el costo real perdido. Se retira su precio de venta. Devuelve antes cualquier exceso de anticipo y registra el soporte del incidente.":unmount?"Confirma que retiraste la piedra de la pieza. Sigue vinculada al trabajo; no regresa a inventario hasta recuperarla físicamente.":"Verifica cantidad, estado y firmeza. La piedra permanece vinculada a esta pieza hasta su entrega.","amber")+field("reason",returning?"Motivo y responsable de recibir las piedras":loss?"Incidente y soporte":"Verificación del montaje","text","",'required maxlength="1000"')+(returning||loss?'<label class="check"><input name="confirmed" type="checkbox" required>Confirmo la comprobación física y el registro descrito.</label>':""),(b,f,k)=>mutate("gem."+action,{...b,orderId,id,confirmed:!!b.confirmed},k));
+}
 function materialsPage() {
   return (
     head(
@@ -1959,6 +2024,7 @@ function materialsPage() {
         "primary",
       ),
     ) +
+    stoneInventory() +
     `<section class="card table-card"><div class="card-head"><div><h2>Inventario de insumos</h2><p>El metal precioso se controla en el Libro de metales.</p></div></div>${table(["Insumo", "Existencia", "Mínimo", "Costo unitario", "Estado", ""], S.materials.map((x) => tr([`<strong>${E(x.name)}</strong>`, E(quantity(x.quantity) + " " + x.unit), E(quantity(x.min) + " " + x.unit), cop(x.unitCost), badge(x.quantity <= x.min ? "Existencia baja" : "Disponible", x.quantity <= x.min ? "amber" : ""), allowed("inventory", "Registrar entrada", "restock-material", "plus", "small", x.id)])).join(""), "Crea los materiales que utilizas; luego descuéntalos desde la orden de trabajo.")}</section><section class="card table-card section-gap"><div class="card-head"><h2>Movimientos de insumos</h2></div>${table(
       ["Fecha", "Insumo", "Cantidad", "Referencia", "Responsable", "Estado / acción"],
       [...S.materialMoves.filter(x=>!x.deletedAt)]
@@ -2089,6 +2155,7 @@ function estimatedCost(o) {
   return (
     PM.cost(o) +
     o.materialUsage.filter(x=>!x.reversedAt).reduce((v, x) => v + x.cost, 0) +
+    (o.stones||[]).filter(x=>x.owner==="taller"&&x.status!=="returned").reduce((sum,x)=>sum+x.cost,0) +
     o.smithFee
   );
 }
@@ -2124,6 +2191,7 @@ function usersPage() {
   );
 }
 const reversalTypes = [
+  ["gemLot","Entrada de piedras propias"],
   ["expense","Gasto del taller"],
   ["purchase","Compra de metal"],["supplierPayment","Pago a proveedor"],
   ["sale","Entrega / venta al cliente"],["payment","Cobro o devolución al cliente"],
@@ -2137,6 +2205,7 @@ const reversalButton = (type,id) => allowed("adjust","Reversar","reverse-operati
 const reversalBadge = (x) => x.reversedAt ? badge("Reversada", "red") : "";
 function reversalCandidates(type) {
   let rows=[];
+  if(type==="gemLot")rows=(S.gemstoneLots||[]).filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.name+" · "+number(x.available)+" und."]);
   if(type==="purchase")rows=S.purchases.filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.document+" · "+cop(x.total)]);
   if(type==="expense")rows=(S.expenses||[]).filter(x=>!x.reversedAt).map(x=>[x.id,x.code+" · "+x.concept+" · "+cop(x.amount)]);
   if(type==="supplierPayment")rows=S.supplierPayments.filter(x=>!x.reversedAt).map(x=>[x.id,(find("purchases",x.purchaseId)?.code||"")+" · "+cop(x.amount)+" · "+x.reference]);
@@ -2155,7 +2224,7 @@ function reversalCandidates(type) {
 }
 function operationSource(type,id) {
   if(type==="stockTransfer")return S.stock.flatMap(x=>x.transfers).find(x=>x.id===id);
-  const collection={expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",payment:"payments",order:"orders",sale:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"}[type];
+  const collection={gemLot:"gemstoneLots",expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",payment:"payments",order:"orders",sale:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"}[type];
   return S[collection]?.find(x=>x.id===id);
 }
 function deletionCandidates(type) {
@@ -2170,7 +2239,7 @@ function reversalsPage() {
     card("Historial de reversiones","Se conserva también en las copias de seguridad y la auditoría.",table(["Fecha / responsable","Operación","Resultado","Motivo / soporte",""],[...(S.reversals||[])].filter(x=>!x.deletedAt).reverse().map(x=>tr([dt(x.at)+"<small>"+E(x.actor)+"</small>",E(reversalTypes.find(t=>t[0]===x.type)?.[1]||x.type)+"<small>"+E(reversalReference(x))+"</small>",E(x.summary),E(x.reason)+"<small>"+E(x.reference)+"</small>",button("Eliminar","delete-operation","","small danger",x.type+"|history:"+x.id)])).join("")));
 }
 function reversalReference(r) {
-  const collections={expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
+  const collections={gemLot:"gemstoneLots",expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
   if(r.type==="stockTransfer")return S.stock.flatMap(x=>x.transfers).find(x=>x.id===r.targetId)?.code||r.targetId;
   const source=S[collections[r.type]]?.find(x=>x.id===r.targetId);
   return r.original?.invoice||source?.code||source?.sku||source?.reference||source?.note||r.targetId;
@@ -2187,7 +2256,7 @@ function reverseOperationModal(type="purchase",targetId="",mode="reverse") {
       if(!prepared||prepared.signature!==signature) {
         const preview=await api("/api/reversal-preview",{method:"POST",body:JSON.stringify(payload)});
         prepared={signature,preview};
-        $("#reversal-preview",form).innerHTML=card("Efecto de la reversión","Todavía no se ha guardado.",`<p>${E(preview.summary)}</p>${row("Cambio de efectivo en el turno abierto",cop(preview.cashDelta))}${preview.bankDelta ? row("Movimiento bancario respaldado",cop(preview.bankDelta)) : ""}${preview.movements.map(x=>row((ACC[x.from]||x.from)+" → "+(ACC[x.to]||x.to),weight(x.mg)+" · "+E(x.metal)+" · ley "+number(x.purity))).join("")}${preview.materials.map(x=>row("Existencia resultante: "+x.name,quantity(x.quantity)+" "+E(x.unit))).join("")}${preview.stock.map(x=>row("Unidades disponibles: "+x.sku,number(x.available))).join("")}`);
+        $("#reversal-preview",form).innerHTML=card("Efecto de la reversión","Todavía no se ha guardado.",`<p>${E(preview.summary)}</p>${row("Cambio de efectivo en el turno abierto",cop(preview.cashDelta))}${preview.bankDelta ? row("Movimiento bancario respaldado",cop(preview.bankDelta)) : ""}${preview.movements.map(x=>row((ACC[x.from]||x.from)+" → "+(ACC[x.to]||x.to),weight(x.mg)+" · "+E(x.metal)+" · ley "+number(x.purity))).join("")}${preview.materials.map(x=>row("Existencia resultante: "+x.name,quantity(x.quantity)+" "+E(x.unit))).join("")}${preview.stock.map(x=>row("Unidades disponibles: "+x.sku,number(x.available))).join("")}${(preview.gems||[]).map(x=>row("Piedras en bodega: "+x.name,number(x.available)+" und. · "+number(x.carats,3)+" ct · "+cop(x.cost))).join("")}${(preview.stones||[]).map(x=>row(x.order+" · "+x.name,E(stoneStatuses[x.status]))).join("")}`);
         $('button[type="submit"]',form).textContent=deleting?"Confirmar eliminación":"Confirmar reversión";
         return false;
       }
@@ -2330,6 +2399,13 @@ function actionLabel(a) {
     "category.save": "Categoría guardada",
     "client.save": "Cliente guardado",
     "order.create": "Orden recibida",
+    "gem.lot": "Entrada de piedras propias",
+    "gem.add": "Piedras registradas en el trabajo",
+    "gem.weight": "Peso bruto y metal neto verificados",
+    "gem.mount": "Piedras montadas en la pieza",
+    "gem.unmount": "Piedras desmontadas de la pieza",
+    "gem.return": "Piedras recuperadas y devueltas físicamente",
+    "gem.loss": "Incidente de pérdida de piedras",
     "order.assign": "Asignación a mesa",
     "order.return": "Retorno y merma",
     "order.deliver": "Entrega de pieza",
@@ -2466,7 +2542,7 @@ function returnOrder(id) {
       "Metal entregado: " + weight(base),
       "Pesa por separado la pieza y la limalla. La merma que exceda el umbral crítico requiere un administrador.",
     ) +
-      `<div class="form-grid">${weightField("pieceWeight", "Pieza terminada (g)", "")}${weightField("scrapWeight", "Limalla / polvo recuperable (g)", 0, true)}<div class="span-2 calculator" id="loss-preview" data-base="${base}">Ingresa los dos pesos para liquidar.</div><div class="span-2">${text("reason", "Observaciones / justificación si hay exceso de merma")}</div></div>`,
+      `<div class="form-grid">${weightField("pieceWeight", "Metal neto en pieza terminada, sin piedras (g)", "")}${weightField("scrapWeight", "Limalla / polvo recuperable (g)", 0, true)}<div class="span-2 calculator" id="loss-preview" data-base="${base}">Ingresa los dos pesos para liquidar.</div><div class="span-2">${text("reason", "Observaciones / justificación si hay exceso de merma")}</div></div>`,
     { id },
     "Liquidar metal y enviar a calidad",
   );
@@ -2779,7 +2855,7 @@ function clientDetail(id) {
 }
 function materialModal() {
   simpleModal(
-    "Registrar piedra o insumo",
+    "Registrar insumo",
     "material.save",
     `<div class="form-grid"><div class="span-2">${field("name", "Nombre del material", "text", "", 'required maxlength="160"')}</div>${field("unit", "Unidad (pieza, ml, ct, g…)", "text", "pieza", 'required maxlength="30"')}${field("quantity", "Existencia inicial", "number", 0, 'min="0" step="0.001" required')}${moneyField("unitCost", "Costo por unidad · COP", 0)}${field("min", "Existencia mínima", "number", 0, 'min="0" step="0.001" required')}</div>`,
   );
@@ -2833,7 +2909,7 @@ function transferStock(id) {
       "Esta acción registra la entrega física y descuenta existencias. El soporte Excel se descarga desde el historial.",
       "amber",
     ) +
-      `<div class="form-grid">${field("quantity", "Unidades a transferir", "number", x.available, `min="1" max="${x.available}" step="1" required`)}${x.components?components.map((item,i)=>weightField("componentWeight-"+i,item.metal+" · ley "+number(item.purity)+" a transferir (g)",item.remainingMg/1000,true)).join(""):weightField("weight", "Peso de las piezas transferidas (g)", (x.remainingMg ?? x.mg) / 1000)}<div class="span-2">${field("destination", "Joyería de destino y responsable que recibe", "text", "", 'required maxlength="250"')}</div></div>`,
+      `<div class="form-grid">${field("quantity", "Unidades a transferir", "number", x.available, `min="1" max="${x.available}" step="1" required`)}${x.components?components.map((item,i)=>weightField("componentWeight-"+i,item.metal+" · ley "+number(item.purity)+" a transferir (g)",item.remainingMg/1000,true)).join(""):weightField("weight", "Metal neto de las piezas, sin piedras (g)", (x.remainingMg ?? x.mg) / 1000)}<div class="span-2">${field("destination", "Joyería de destino y responsable que recibe", "text", "", 'required maxlength="250"')}</div></div>`,
     (b,form,key)=>{
       const parts=x.components?components.map((item,i)=>({metal:item.metal,purity:item.purity,weight:b["componentWeight-"+i]})):undefined;
       return mutate("stock.transfer",{id,quantity:b.quantity,destination:b.destination,weight:parts?parts.reduce((sum,item)=>sum+Math.round(item.weight*1000),0)/1000:b.weight,...(parts?{components:parts}:{})},key);
@@ -2893,6 +2969,10 @@ function bindPage() {
   $$("form").forEach(syncMetalFields);
   const f = $("#receive-form");
   if (f) {
+    const net=f.elements.receivedWeight;
+    net.closest(".field").querySelector("span").textContent="Peso neto del metal recibido, sin piedras (g)";
+    net.closest(".weight-control").insertAdjacentHTML("afterend",`<div class="span-2" id="receive-stone-controls"><label class="check"><input name="hasStones" type="checkbox">La joya del cliente trae piedras.</label><div class="form-grid" id="receive-stone-weights" hidden>${weightField("grossWeight","Peso bruto de la joya, con piedras (g)","")}${select("weightStatus","Peso neto del metal",[["pending","Pendiente de pesar"],["estimated","Estimado; no ingresa al libro"],["confirmed","Pesado y confirmado"]],"pending")}<p class="muted span-2">Registra el detalle de las piedras en la ficha del trabajo. Un peso neto pendiente o estimado no entra como oro ni permite asignar a mesa.</p></div></div>`);
+    f.elements.hasStones.addEventListener("change",()=>updateReceptionType(f));
     updateReceptionType(f);
     quotePreview(f);
     if (receivedPhoto)
@@ -2907,6 +2987,7 @@ function bindPage() {
         if (b.laborEstimate) b.laborEstimate = JSON.parse(b.laborEstimate);
         else delete b.laborEstimate;
         b.orderMetals = JSON.parse(b.orderMetals || "[]");
+        b.hasStones=!!b.hasStones;
         if (photoPromise) await photoPromise;
         delete b.photo;
         b.photo = receivedPhoto;
@@ -3098,8 +3179,9 @@ function printOrder(id) {
     receiptHeader(
       o.invoice ? "COMPROBANTE COMERCIAL DE ENTREGA" : "RECIBO DE CUSTODIA",
     ) +
+      stoneReceipt(o) +
       (o.returned && PM.groups(o).length>1 ? "<hr><strong>METALES EN LA PIEZA</strong>"+PM.pieces(o).map(item=>row(E(item.metal)+" · ley "+number(item.purity),weight(item.mg))).join("") : "") +
-      `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${(o.orderMetals || []).map((x)=>`<p class="receipt-pre">${E(x.name)}: ${cop(x.price)}</p>`).join("")}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
+      `<hr><strong>${E(o.invoice || o.code)}</strong><br>Orden: ${E(o.code)}<br>Emitido: ${dt(o.deliveredAt || o.createdAt)}<br>Cliente: ${E(c?.name)}<br>Documento: ${E(c?.document)}<br>Prometida: ${dateLabel(o.dueDate)}<hr><strong>TRABAJO SOLICITADO</strong><p class="receipt-pre">${E(o.description)}</p><br>Estado recibido: ${E(o.condition)}<br>Metal cliente: ${weight(o.receivedMg)}<br>${E(o.metal)} · Ley ${number(o.purity)}${o.returned ? `<br>Metal neto en pieza terminada: ${weight(o.returned.pieceMg)}<br>Limalla del cliente: ${weight(o.returned.scraps[o.allocations.findIndex((x) => x.owner === o.id)] || 0)}<br>Sobrante sin procesar: ${weight(Math.max(0, o.receivedMg - o.allocations.filter((x) => x.owner === o.id).reduce((v, x) => v + x.mg, 0)))}` : ""}<hr>${row("Mano de obra", cop(o.labor))}${row("Insumos", cop(o.materialPrice))}${row("Metal del taller", cop(o.goldPrice))}${(o.orderMetals || []).map((x)=>`<p class="receipt-pre">${E(x.name)}: ${cop(x.price)}</p>`).join("")}${row("Impuesto " + number(o.taxPercent) + " %", cop(o.tax))}${row("TOTAL", cop(total(o)))}${row("Abonos", cop(paid(o)))}${row("SALDO", cop(due(o)))}<hr><small>El metal en custodia es propiedad del cliente y no constituye pago.</small><p class="receipt-pre">${E(S.settings.warranty)}</p><div class="signature"></div><div class="center">${o.acceptance ? E(o.acceptance) : "Firma de conformidad del cliente"}</div><hr><small>Comprobante comercial. Sin validación de factura electrónica DIAN.</small>`,
   );
 }
 function printPurchase(id) {
@@ -3152,6 +3234,8 @@ async function exportData(type, id) {
   const from = filters.reportFrom || today().slice(0, 7) + "-01",
     to = filters.reportTo || today(),
     inRange = (at) => at && dayKey(at) >= from && dayKey(at) <= to;
+  if(type==="gems")return excel("inventario-piedras",["Código","Piedra","Tipo","Cantidad inicial","Cantidad disponible","Quilates iniciales ct","Quilates disponibles ct","Costo total COP","Costo disponible COP","Precio sugerido unidad COP","Talla","Medidas","Certificado","Observaciones","Estado entrada"],(S.gemstoneLots||[]).filter(x=>!x.deletedAt).map(x=>[x.code,x.name,x.individual?"Individual":"Lote",x.quantity,x.available,x.caratMilli/1000,x.remainingCaratMilli/1000,x.cost,x.remainingCost,x.unitPrice,x.cut,x.measurements,x.certificate,x.notes,x.reversedAt?"Reversada":"Vigente"]));
+  if(type==="gem-orders")return excel("piedras-por-trabajo",["Orden","Cliente","Piedra","Propietario","Unidades","Quilates ct","Estado","Costo COP","Precio acordado COP","Precio incluido COP","Lote propio","Certificado","Estado recibido","Talla","Medidas","Observaciones"],S.orders.filter(o=>!o.deletedAt).flatMap(o=>(o.stones||[]).map(x=>[o.code,client(o),x.name,x.owner==="cliente"?"Cliente · custodia":"Taller",x.quantity,x.caratMilli===null?null:x.caratMilli/1000,stoneStatuses[x.status],x.cost,x.price,x.owner==="taller"&&!["returned","lost"].includes(x.status)?x.price:0,(S.gemstoneLots||[]).find(l=>l.id===x.stockId)?.code||"",x.certificate,x.condition||"",x.cut,x.measurements,x.notes])));
   if(type==="purchases")return excel("ordenes-compra",["Orden","Fecha","Proveedor","Documento","Categoría / metal","Ley","Peso g","Precio por gramo COP","Base del precio","Subtotal COP","Total orden COP","Saldo pendiente COP","Vencimiento","Estado"],
     S.purchases.filter(p=>!p.deletedAt).flatMap(p=>purchaseItems(p).map((item,index)=>[p.code,window.TallerExcel.date(p.at),find("suppliers",p.supplierId)?.name,p.document,item.categoryName,item.purity,item.mg/1000,item.unitPrice,p.priceBasis==="gross"?"Gramo recibido de la categoría":"Gramo fino",item.total,index===0?p.total:null,index===0?purchasePending(p):null,window.TallerExcel.date(p.dueDate),p.reversedAt?"Reversada":"Recibida · inventario ingresado"])));
   if (type === "ledger") {
@@ -3314,6 +3398,7 @@ async function exportData(type, id) {
             "Entrega",
             "Estado",
             "Composición por metal",
+            "Piedras incluidas en la pieza",
           ],
           [
             [
@@ -3331,6 +3416,7 @@ async function exportData(type, id) {
               t.actor,
               t.reversedAt ? "Reversada" : "Vigente",
               (t.components||[{metal:s.metal,purity:s.purity,mg:t.mg}]).map(item=>item.metal+" · ley "+number(item.purity)+" · "+weight(item.mg)).join("; "),
+              (find("orders",s.orderId)?.stones||[]).filter(x=>x.events.some(e=>e.to==="delivered"&&e.ref===t.code)).map(x=>x.name+" · "+number(x.quantity)+" und. · "+ctLabel(x.caratMilli)+(x.certificate?" · "+x.certificate:"")).join("; "),
             ],
           ],
         );
@@ -3415,6 +3501,16 @@ async function handleAction(action, id, el) {
       closeModal();
       route("orders", id);
       break;
+    case "new-gem":newGemModal();break;
+    case "gem-weight":gemWeightModal(id);break;
+    case "gem-customer":addGemModal(id,"cliente");break;
+    case "gem-own":addGemModal(id,"taller");break;
+    case "gem-mount":stoneActionModal("mount",id);break;
+    case "gem-unmount":stoneActionModal("unmount",id);break;
+    case "gem-return":stoneActionModal("return",id);break;
+    case "gem-loss":stoneActionModal("loss",id);break;
+    case "gem-detail":{const [orderId,stoneId]=id.split("|");modal("Ficha de piedra",gemDetailHtml(find("orders",orderId).stones.find(x=>x.id===stoneId)));break;}
+    case "gem-lot-detail":{const x=(S.gemstoneLots||[]).find(x=>x.id===id);modal("Ficha de lote · "+x.code,gemDetailHtml(x)+row("Costo total original",cop(x.cost))+row("Costo disponible",cop(x.remainingCost))+S.orders.flatMap(o=>(o.stones||[]).filter(v=>v.stockId===id).map(v=>`<div class="summary-row"><span>${E(o.code)} · ${number(v.quantity)} · ${E(stoneStatuses[v.status])}</span>${button("Ver trabajo","open-order","","small",o.id)}</div>`)).join(""));break;}
     case "new-production":
       route("receive");
       setTimeout(() => {
@@ -3556,11 +3652,11 @@ async function handleAction(action, id, el) {
     case "quality-order":
       modal(
         "Control de calidad · " + find("orders", id).code,
-        `<p class="muted">Verifica físicamente la pieza antes de marcarla como lista.</p><label class="check"><input name="size" type="checkbox" required>Medidas, talla y peso verificados.</label><label class="check"><input name="finish" type="checkbox" required>Acabado, pulido y ley conformes con lo acordado.</label><label class="check"><input name="gems" type="checkbox" required>Piedras, broches y ensambles firmes y completos.</label>${text("note", "Observaciones de calidad")}`,
+        `<p class="muted">Verifica físicamente la pieza antes de marcarla como lista.</p><label class="check"><input name="size" type="checkbox" required>Medidas, talla y peso verificados.</label><label class="check"><input name="finish" type="checkbox" required>Acabado, pulido y ley conformes con lo acordado.</label><label class="check"><input name="gems" type="checkbox" required>Piedras, broches y ensambles firmes y completos.</label>${(find("orders",id).stones||[]).some(x=>x.owner==="cliente"&&x.status==="lost")?'<label class="check"><input name="stoneIncident" type="checkbox" required>Cliente informado y soporte de la pérdida de sus piedras registrado.</label>':""}${text("note", "Observaciones de calidad")}`,
         (b, f, key) =>
           mutate(
             "order.quality",
-            { id, checks: [!!b.size, !!b.finish, !!b.gems], note: b.note },
+            { id, checks: [!!b.size, !!b.finish, !!b.gems], note: b.note, stoneIncidentAcknowledged:!!b.stoneIncident },
             key,
           ),
         "Aprobar y dejar lista",
@@ -3598,7 +3694,7 @@ async function handleAction(action, id, el) {
         "order.cancel",
         notice(
           "Devuelve la pieza al cliente",
-          "Se conservará la orden anulada y el movimiento de devolución. Solo se permite sin producción ni pagos.",
+          "Confirma la devolución física de la pieza y de todas sus piedras. Las piedras propias recuperadas vuelven a bodega; las del cliente se entregan a su dueño. Solo se permite sin producción ni pagos.",
           "amber",
         ) +
           field(
@@ -3608,7 +3704,7 @@ async function handleAction(action, id, el) {
             "",
             'required maxlength="1000"',
           ),
-        { id },
+        { id, confirmed:true },
         "Anular orden",
       );
       break;

@@ -3,6 +3,7 @@ const { randomUUID } = require("node:crypto");
 const Labor = require("./labor-estimate.js");
 const Numbers = require("./numbers.js");
 const PM = require("./production-metals.js");
+const Gems = require("./gems.cjs");
 const id = () => randomUUID();
 const now = () => new Date().toISOString();
 const day = () =>
@@ -373,7 +374,9 @@ function allocate(amount, caps) {
   assert(!rest, "No fue posible distribuir el metal.");
   return result;
 }
+function gemTools() { return {assert,str,num,money,grams,id,now,seq,get,permit,move,paid,timeline,Numbers}; }
 function execute(s, action, b, a) {
+  if (action.startsWith("gem.")) return Gems.execute(s,action,b,a,gemTools());
   switch (action) {
     case "operation.delete": {
       permit(a,"adjust");
@@ -381,7 +384,7 @@ function execute(s, action, b, a) {
     }
     case "operation.reverse": {
       permit(a,"adjust");
-      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM});
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM,Gems,gemTools});
     }
     case "category.delete": {
       permit(a, "settings");
@@ -511,6 +514,12 @@ function execute(s, action, b, a) {
         x.type !== "Producción propia" || x.receivedMg === 0,
         "La producción propia no recibe metal de clientes.",
       );
+      if (b.hasStones === true) {
+        assert(x.type!=="Producción propia","Registra las piedras propias desde la ficha del trabajo.");
+        x.gemWeight={grossMg:grams(b.grossWeight,"Peso bruto de la joya"),netMg:x.receivedMg,status:b.weightStatus};
+        if (b.weightStatus!=="confirmed") x.receivedMg=0;
+        Gems.weightCheck(x,gemTools());
+      }
       if (b.photo) {
         assert(
           typeof b.photo === "string" &&
@@ -548,6 +557,7 @@ function execute(s, action, b, a) {
       );
       const reason = str(b.reason, "Motivo", 1000);
       const q = quote(s, b);
+      assert(q.materialPrice>=Gems.stonePrice(o),"Piedras e insumos no puede ser menor al precio de las piedras detalladas de este trabajo.");
       assert((q.orderMetals ?? o.orderMetals ?? []).reduce((v,x)=>v+x.price,0) <= q.goldPrice, "El total de metal vendido no puede ser menor que los metales detallados.");
       assert(
         q.labor + q.materialPrice + q.goldPrice + q.tax >= paid(s, o),
@@ -566,6 +576,7 @@ function execute(s, action, b, a) {
       permit(a, "production");
       const o = get(s, "orders", b.id);
       assert(o.status === "received", "Solo se asignan órdenes recibidas.");
+      Gems.ready(o,gemTools());
       const smith = get(s, "smiths", b.smithId);
       const customer = grams(
           b.customerWeight ?? 0,
@@ -747,6 +758,7 @@ function execute(s, action, b, a) {
     case "order.quality": {
       permit(a, "production");
       const o = get(s, "orders", b.id);
+      Gems.resolved(o,gemTools());
       assert(
         o.status === "quality" && o.returned,
         "Registra el retorno de metal primero.",
@@ -757,10 +769,13 @@ function execute(s, action, b, a) {
           b.checks.every((x) => x === true),
         "Verifica medidas, acabado y piedras / ensambles.",
       );
+      const stoneIncident=(o.stones||[]).some(x=>x.owner==="cliente"&&x.status==="lost");
+      assert(!stoneIncident||b.stoneIncidentAcknowledged===true,"Confirma que el cliente fue informado y que existe un soporte de la pérdida de sus piedras.");
       o.quality = {
         at: now(),
         actor: a.name,
         note: str(b.note, "Control de calidad", 1500, false),
+        ...(stoneIncident?{stoneIncidentAcknowledged:true}:{}),
       };
       o.status = "ready";
       timeline(o, a, "Control de calidad aprobado. Lista para entrega.");
@@ -769,6 +784,7 @@ function execute(s, action, b, a) {
     case "order.deliver": {
       permit(a, "orders");
       const o = get(s, "orders", b.id);
+      Gems.resolved(o,gemTools());
       assert(
         o.status === "ready",
         "La orden debe pasar control de calidad antes de entregarse.",
@@ -817,6 +833,7 @@ function execute(s, action, b, a) {
       o.status = "delivered";
       o.deliveredAt = now();
       o.invoice = seq(s, "sale", "V");
+      Gems.finish(o,o.invoice,a,gemTools());
       o.acceptance = str(b.acceptance, "Recibido por / documento", 250);
       timeline(
         o,
@@ -837,6 +854,7 @@ function execute(s, action, b, a) {
         "La orden ya tiene insumos consumidos y actividad de producción; revisa sus consumos antes de anular.",
       );
       const reason = str(b.reason, "Motivo de anulación", 1000);
+      Gems.close(s,o,b,a,gemTools());
       if (o.receivedMg)
         move(
           s,
@@ -1559,6 +1577,8 @@ function execute(s, action, b, a) {
         "Debe ser una producción propia aprobada en calidad.",
       );
       const qty = num(b.quantity, "Unidades", 1, 10000);
+      Gems.resolved(o,gemTools());
+      assert(!(o.stones||[]).some(x=>x.status==="mounted")||qty===1,"Una pieza con piedras identificadas debe ingresar individualmente: una orden por pieza.");
       assert(
         Number.isInteger(qty) && qty <= o.returned.pieceMg,
         "Unidades enteras; cada pieza debe pesar al menos 0,001 g.",
@@ -1626,6 +1646,7 @@ function execute(s, action, b, a) {
       x.remainingCost = (x.remainingCost ?? x.cost) - transferCost;
       const ref = seq(s, "stockTransfer", "TR");
       const destination=str(b.destination,"Destino y responsable",250);
+      Gems.finish(get(s,"orders",x.orderId),ref,a,gemTools());
       for(const item of components||[{metal:x.metal,purity:x.purity,mg}])
         move(s,a,"finished","minorista",item.mg,item.metal,item.purity,"taller",ref,destination);
       if(components)x.components.forEach((item,index)=>{item.remainingMg-=components[index].mg;});
@@ -1787,7 +1808,7 @@ function validateState(s) {
     }
   }
   const deletionIndex=new Map((s.deletions||[]).map(x=>[x.id,x]));
-  for(const row of [...s.orders,...s.ledger,...s.payments,...s.cashEntries,...s.purchases,...s.supplierPayments,...s.materialMoves,...s.settlements,...s.stock,...s.stock.flatMap(x=>x.transfers||[]),...s.orders.flatMap(x=>x.materialUsage||[]),...(Array.isArray(s.expenses)?s.expenses:[]),...(s.reversals||[])]){
+  for(const row of [...s.orders,...s.ledger,...s.payments,...s.cashEntries,...s.purchases,...s.supplierPayments,...s.materialMoves,...s.settlements,...s.stock,...s.stock.flatMap(x=>x.transfers||[]),...s.orders.flatMap(x=>x.materialUsage||[]),...(Array.isArray(s.expenses)?s.expenses:[]),...(Array.isArray(s.gemstoneLots)?s.gemstoneLots:[]),...(s.reversals||[])]){
     assert(row&&typeof row==="object","Registro operativo inválido en la copia.");
     if(row.deletedAt===undefined)continue;
     const deletion=deletionIndex.get(row.deletionId);
@@ -2070,6 +2091,7 @@ function validateState(s) {
     money(s.settings.rate[x.id], "Tarifa de " + x.name);
   }
   assert(defaultMetals().every((x) => metalIds.has(x.id)), "Faltan los metales base del taller.");
+  Gems.validate(s,gemTools());
   return s;
 }
 module.exports = {

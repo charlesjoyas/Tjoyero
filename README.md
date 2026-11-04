@@ -48,6 +48,22 @@ Reversar una venta reabre la entrega y devuelve los movimientos de pieza y sobra
 
 ## Inventarios y administración
 
+### Piedras preciosas
+
+**Piedras e insumos → Registrar lote o piedra** controla gemas propias por unidades, quilates totales (ct, hasta tres decimales), costo total y precio sugerido por unidad. Permite talla, medidas, certificado, fotografía y observaciones. Una piedra valiosa puede registrarse individualmente; los lotes agrupan piedras equivalentes. Cada entrada es un lote nuevo. Esta entrada física no genera una salida de caja: si corresponde, su pago se registra una sola vez como gasto. Los insumos anteriores se conservan en su inventario original.
+
+En la ficha de cada orden, **Piedras de este trabajo** distingue las del cliente y las del taller. Las propias se descuentan al asignarlas al trabajo, conservando unidades, quilates y costo; su precio total se añade una vez al presupuesto de Piedras e insumos, con el impuesto de la orden. Las del cliente son custodia, con estado recibido, foto opcional y quilates opcionales; no generan patrimonio ni venta. Cada línea representa una piedra o grupo con un mismo destino: para destinos distintos hay que registrar líneas separadas.
+
+En recepción, marcar **La joya del cliente trae piedras** separa el peso bruto del peso neto del metal. Un neto pendiente o estimado no entra al libro de metales y bloquea la asignación hasta confirmar el pesaje y registrar las piedras. Desde la ficha puede corregirse ese pesaje antes de asignar; la corrección conserva movimientos e historial. Los pesos de retorno y traslado son siempre de **metal neto, sin piedras**. Nunca se supone que el peso bruto completo sea oro ni se deduce un neto a partir de quilates desconocidos.
+
+Producción registra montaje o desmontaje; las piedras sueltas quedan pendientes hasta montarlas o devolverlas. Calidad bloquea pendientes. Una pérdida exige administrador, motivo y comprobación; conserva el costo real perdido y no aumenta existencias. Si es una piedra del cliente, calidad exige constancia de que fue informado y de que existe soporte. Retirar del presupuesto una piedra propia exige devolver primero cualquier exceso de anticipo.
+
+Entregar una pieza entrega también sus gemas montadas. Reversar la venta o una transferencia las devuelve **dentro de la pieza**, sin restituirlas a bodega. **Recuperar a inventario** exige confirmar su recuperación física; una reversión completa devuelve las piedras propias recuperadas y la custodia del cliente, después de reembolsar el saldo. Las pérdidas no se reponen automáticamente. Una entrada de piedras solo puede reversarse con todo el lote físicamente recuperado; sus pagos se revisan por separado. La eliminación operativa conserva el historial y no compensa dos veces.
+
+La producción propia con piedras identificadas se ingresa como **una pieza por orden**, para identificar sus gemas durante los traslados. Los comprobantes, copias y exportaciones incluyen las piedras: inventario propio, detalle por trabajo y gemas de cada traslado. Las cantidades de piedras no se mezclan con los gramos ni con el fino del Libro de metales. Los costos disponibles son costos registrados, no una tasación gemológica.
+
+### Otros inventarios y administración
+
 En **Reversiones → Eliminar operación**, el administrador puede retirar un registro de sus listados operativos y exportaciones. Debe escribir **ELIMINAR**, revisar el efecto y confirmar. Se aplican las mismas compensaciones y restricciones que al reversar; si el registro ya estaba reversado, solo se retira sin repetir devoluciones. Cada fila del historial de reversiones también ofrece **Eliminar**. Los documentos y movimientos necesarios para conciliar caja, inventario y cierres se conservan como evidencia en auditoría y respaldos. Eliminar una entrega reabre el trabajo; para retirar también el trabajo se selecciona **Orden de trabajo completa**.
 
 - **Libro de metales:** bodega propia, custodia, recibido como pago, base de oro en caja, mesas, limalla, fundido y piezas terminadas propias. Se separan oro, plata y platino, leyes y propietarios.

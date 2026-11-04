@@ -2,6 +2,18 @@
 
 La revisión se ejecutó con bases de datos temporales y usuarios ficticios. No se modificaron los registros reales del taller.
 
+## Piedras preciosas — implementación y verificación
+
+- Inventario propio por piedra individual o lote: unidades, quilates, costo, precio, talla, medidas, certificado y fotografía. Custodia del cliente separada, sin contabilizarla como patrimonio o venta.
+- Salidas a trabajos, montaje y desmontaje, recuperación física, devolución al cliente e incidentes. No se aprueba calidad con piedras pendientes; la pérdida de una piedra del cliente exige constancia del incidente y comunicación.
+- Peso bruto recibido separado del metal neto. Un peso pendiente o estimado no genera oro en el libro; asignar requiere confirmar el neto y detallar la custodia.
+- Precios incluidos una vez en el presupuesto, impuesto exacto, costos conservados y protección de anticipos. Cuarenta salidas y devoluciones con costo de un billón de COP y quilates impares conservaron exactamente unidades, peso y costo.
+- Entregas y traslados conservan el vínculo con las piedras. Una venta reversada devuelve las gemas dentro de su pieza, sin regresarlas automáticamente a bodega. La producción propia con gemas identificadas se registra individualmente.
+- Reversión y eliminación de entradas seguras, vista previa de unidades / quilates / costos, copias y restauración validadas. No hay compensaciones duplicadas.
+- Comprobantes y Excel de inventario, piedras por trabajo y gemas de cada traslado. Quilates exportados como números con tres decimales.
+- Diez pruebas nuevas del dominio y una nueva prueba con el emulador Turso verifican permisos, límites, conservación, reintentos, persistencia, custodia, incidentes, reversiones y copias corruptas. El recorrido nuevo de navegador verifica además fotos, formularios, impresión, dos exportaciones y vista previa en escritorio y móvil.
+- El estado actual de producción pasó la nueva validación mediante una única consulta SELECT de solo lectura.
+
 ## Última revisión a profundidad — 4 de noviembre
 
 Se recorrieron recepción y presupuestos, categorías, compras, proveedores, inventarios, trabajos con varios metales, fundición, insumos, calidad, ventas y entregas, cobros y devoluciones, gastos, turnos de caja, honorarios, valoración, reversiones, eliminación, respaldos, usuarios, permisos, impresión y Excel.
@@ -14,8 +26,8 @@ Se corrigieron tres problemas reproducidos durante esta revisión:
 
 Evidencia final:
 
-- 101 pruebas de Node aprobadas; ninguna falla o prueba omitida.
-- 19 recorridos de navegador aprobados. Incluyen los últimos módulos, funcionamiento sin recursos externos, pérdidas de conexión y recuperación, exportaciones reales y PDF en Chrome/Edge.
+- 112 pruebas de Node aprobadas; ninguna falla o prueba omitida.
+- 20 recorridos de navegador aprobados. Incluyen piedras preciosas, los últimos módulos, funcionamiento sin recursos externos, pérdidas de conexión y recuperación, exportaciones reales y PDF en Chrome/Edge.
 - 20 vistas en anchos de 1440, 1024, 768, 390, 360 y 320 píxeles, sin desbordamientos ni errores de ejecución.
 - Simulación nueva de diez jornadas: 606 operaciones, 53 órdenes, 30 compras, 59 eliminaciones y 99 reversiones. Se concilian después de cada operación los metales y propietarios, mesas, custodias, lotes, insumos, efectivo y valoración. Los diez cierres permanecen intactos. Efectivo final comprobado: 1.363.000 COP.
 - Se mantienen las simulaciones anteriores de cinco y diez jornadas, la carga de 3.000 órdenes/3.000 pagos y las pruebas de concurrencia, idempotencia, fallos de almacenamiento y copias mayores de 4,5 MB.

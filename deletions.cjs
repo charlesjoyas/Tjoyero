@@ -4,7 +4,7 @@ module.exports=function removeOperation(s,b,a,D){
   const {assert,get,str,id,now,execute}=D;
   assert(b.confirmed===true&&b.confirmation==="ELIMINAR","Escribe ELIMINAR y confirma la devolución real antes de eliminar.");
   const reason=str(b.reason,"Motivo de eliminación",1000),reference=str(b.reference,"Soporte",200,false);
-  const collections={expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",payment:"payments",order:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
+  const collections={gemLot:"gemstoneLots",expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",payment:"payments",order:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
   const repeatable=["sale","assignment","quality"];
   assert(collections[b.type]||repeatable.includes(b.type)||b.type==="stockTransfer","Esta operación no admite eliminación.");
   let reversal;

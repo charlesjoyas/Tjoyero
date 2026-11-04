@@ -11,7 +11,7 @@ $packageFiles = @(
     'index.html', 'app.js', 'numbers.js', 'labor-estimate.js', 'transport.js', 'styles.css', 'icon.svg',
     'excel-export.js', 'exceljs.min.js', 'EXCELJS-LICENSE.txt', 'scripts/vendor-excel.cjs',
     'production-metals.js',
-    'deletions.cjs',
+    'deletions.cjs', 'gems.cjs',
     'server.cjs', 'domain.cjs', 'reversals.cjs', 'storage-schema.cjs', 'cloud-storage.cjs', 'transfers.cjs',
     'api/index.js', 'scripts/build-vercel.cjs', 'scripts/migrate-turso.cjs',
     'scripts/export-cloud-backup.cjs', 'scripts/package-vercel.ps1', 'VERCEL.md', 'README.md', 'REVISION-FINAL.md'

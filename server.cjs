@@ -514,6 +514,8 @@ function createApp(options = {}) {
             movements:next.ledger.slice(before.ledger.length),
             materials:next.materials.filter((x,i)=>x.quantity!==before.materials[i].quantity).map(x=>({name:x.name,quantity:x.quantity,unit:x.unit})),
             stock:next.stock.filter((x,i)=>x.available!==before.stock[i].available).map(x=>({sku:x.sku,available:x.available})),
+            gems:(next.gemstoneLots||[]).filter(x=>x.available!==(before.gemstoneLots||[]).find(v=>v.id===x.id)?.available).map(x=>({name:x.code+" · "+x.name,available:x.available,carats:x.remainingCaratMilli/1000,cost:x.remainingCost})),
+            stones:next.orders.flatMap(o=>(o.stones||[]).filter(x=>x.status!==before.orders.find(v=>v.id===o.id)?.stones?.find(v=>v.id===x.id)?.status).map(x=>({order:o.code,name:x.name,status:x.status}))),
           });
         }
         if (pathname === "/api/backup" && req.method === "GET") {

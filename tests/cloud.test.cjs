@@ -12,6 +12,25 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: piedras, fotos, stock y custodia sobreviven reintentos, reversión y restauración",async t=>{
+ const f=await fixture(t);await f.request("/api/setup",{workshop:"Gemas",name:"Admin",username:"admin",password:"1234",setupKey});
+ const act=async(action,b,key)=>{const r=await f.act(action,b,key);assert.equal(r.status,200,JSON.stringify(r.body));return r.body.result;};
+ const client=await act("client.save",{name:"Cliente"}),lot=await act("gem.lot",{name:"Esmeralda individual",individual:true,quantity:1,carats:1,cost:300000,unitPrice:500000,photo:"data:image/png;base64,YQ=="});
+ const o=await act("order.create",{clientId:client.id,type:"Reparación",description:"Anillo",condition:"Con rubí",metal:"oro",purity:750,receivedWeight:2,hasStones:true,grossWeight:2.2,weightStatus:"confirmed",dueDate:"2026-12-01",taxPercent:0});
+ await act("gem.add",{orderId:o.id,owner:"cliente",name:"Rubí",quantity:1,carats:1,condition:"Buen estado",includedInPiece:true,mounted:true});
+ const payload={orderId:o.id,owner:"taller",stockId:lot.id,quantity:1,carats:1,price:500000},key=randomUUID();await act("gem.add",payload,key);const original=await f.state();await act("gem.add",payload,key);assert.deepEqual(await f.state(),original);await f.open();assert.deepEqual(await f.state(),original);
+ const invalid=await f.act("gem.add",{orderId:o.id,owner:"cliente",name:"Peso imposible",quantity:1,carats:10,condition:"No debe guardarse",includedInPiece:true});assert.equal(invalid.status,400);assert.deepEqual(await f.state(),original);
+ const excess=await f.act("gem.add",payload);assert.equal(excess.status,400);assert.deepEqual(await f.state(),original);
+ const backup=(await f.request("/api/backup")).body;
+ const preview=await f.request("/api/reversal-preview",{type:"order",id:o.id,confirmed:true,reason:"Piedras recuperadas y custodia entregada"});assert.equal(preview.status,200);assert.equal(preview.body.gems[0].available,1);assert.equal(preview.body.stones.length,2);assert.deepEqual(await f.state(),original);
+ await act("operation.delete",{type:"order",id:o.id,confirmed:true,confirmation:"ELIMINAR",reason:"Piedras recuperadas y custodia entregada"});assert.equal((await f.state()).gemstoneLots[0].available,1);
+ await act("backup.restore",{backup,password:"1234"});let restored=await f.state();assert.deepEqual(restored.gemstoneLots,original.gemstoneLots);assert.deepEqual(restored.orders,original.orders);
+ for(const corrupt of [s=>s.gemstoneLots[0].available++,s=>s.orders[0].stones[1].cost++]){
+  const bad=structuredClone(backup),content=bad.content||bad;corrupt(content.state);bad.checksum=createHash("sha256").update(JSON.stringify(content)).digest("hex");
+  const before=await f.state(),r=await f.act("backup.restore",{backup:bad,password:"1234"});assert.equal(r.status,400);assert.deepEqual(await f.state(),before);
+ }
+});
+
 test("Revisión nube: copias con consumos corruptos se rechazan como datos inválidos y no reemplazan la operación",async t=>{
  const f=await fixture(t);await f.request("/api/setup",{workshop:"Revisión de copias",name:"Admin",username:"admin",password:"1234",setupKey});
  const client=(await f.act("client.save",{name:"Cliente"})).body.result,material=(await f.act("material.save",{name:"Broche",unit:"pieza",quantity:5,unitCost:1000,min:0})).body.result;

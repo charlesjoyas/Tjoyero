@@ -76,6 +76,7 @@ test(
     for (const name of [
       "server.cjs",
       "domain.cjs",
+      "gems.cjs",
       "reversals.cjs",
       "deletions.cjs",
       "app.js",

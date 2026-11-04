@@ -16,6 +16,12 @@ module.exports = function reverse(s, b, a, D) {
   const cashBack=(amount,label)=>cash(s,a,openShift(s),amount,label+": "+reason,ref);
   const inverse=(x)=>move(s,a,x.to,x.from,x.mg,x.metal,x.purity,x.owner,ref,reason);
   switch(b.type) {
+    case "gemLot": {
+      const lot=get(s,"gemstoneLots",b.id);live(lot);
+      assert(lot.available===lot.quantity&&lot.remainingCaratMilli===lot.caratMilli&&lot.remainingCost===lot.cost,"Recupera físicamente todas las piedras del lote antes de devolver su entrada.");
+      lot.available=0;lot.remainingCaratMilli=0;lot.remainingCost=0;mark(lot);
+      record.summary="Entrada de piedras "+lot.code+" devuelta físicamente; sin existencias pendientes. Sus pagos o gastos se revisan por separado.";break;
+    }
     case "expense": {
       const expense=get(s,"expenses",b.id);live(expense);paidAmount(expense);bankProof(expense.method);
       if(expense.method==="cash") {
@@ -90,6 +96,7 @@ module.exports = function reverse(s, b, a, D) {
       const matches=(route,x)=>x.owner===route.owner&&x.from===route.from&&PM.key(x)===PM.key(route);
       assert(expectedRoutes.every(route=>Number.isSafeInteger(route.mg)&&route.mg>=0&&rows.filter(x=>matches(route,x)).reduce((v,x)=>v+x.mg,0)===route.mg)&&rows.every(x=>expectedRoutes.some(route=>matches(route,x))),"Los movimientos de entrega no concilian con los pesajes originales.");
       for(const x of rows)inverse(x);
+      D.Gems.finish(o,o.invoice,a,D.gemTools(),true);
       o.status="ready";o.invoice=null;o.deliveredAt=null;o.acceptance=null;o.deliveryLedgerIds=[];
       timeline(o,a,"Entrega / venta "+record.original.invoice+" reversada: "+reason);
       record.summary="Venta "+record.original.invoice+" reversada; pieza y sobrantes recibidos de vuelta. La orden vuelve a lista para entrega. Los pagos se conservan y se devuelven por separado.";
@@ -120,6 +127,7 @@ module.exports = function reverse(s, b, a, D) {
         record.refund={code:payment.code,amount:refund,method:b.refundMethod};
       }
       assert(paid(s,o)===0,"El saldo abonado debe quedar devuelto antes de cerrar la orden.");
+      D.Gems.close(s,o,{confirmed:b.confirmed,reason},a,D.gemTools());
       const recovered=[];
       if(o.returned)for(const group of PM.groups(o)){
         const mg=group.indexes.reduce((sum,index)=>sum+(o.allocations[index].owner==="taller"?o.returned.pieces[index]:0),0);
@@ -212,6 +220,7 @@ module.exports = function reverse(s, b, a, D) {
       }
       stock.available+=t.quantity;stock.remainingMg=(stock.remainingMg??stock.mg)+t.mg;
       stock.remainingCost=(stock.remainingCost??stock.cost)+t.cost;
+      D.Gems.finish(get(s,"orders",stock.orderId),t.code,a,D.gemTools(),true);
       mark(t);record.summary="Transferencia "+t.code+" reversada; unidades, peso y costo devueltos al lote "+stock.sku+".";
       break;
     }

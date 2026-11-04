@@ -41,7 +41,7 @@
     if (typeof value !== "number") return "@";
     if (/^ID$/i.test(heading)) return "0";
     if (/\bFino g\b/i.test(heading)) return "[$-es-CO]#,##0.000000";
-    if (/\bg\b/i.test(heading)) return "[$-es-CO]#,##0.000";
+    if (/\b(g|ct)\b/i.test(heading)) return "[$-es-CO]#,##0.000";
     return "[$-es-CO]#,##0.00";
   }
   async function write(sheetName, headers, rows, metadata = {}) {
