@@ -1471,8 +1471,14 @@ function clientsPage() {
     )}</section>`
   );
 }
+const metalCop = value => "$ " + new Intl.NumberFormat("es-CO",{minimumFractionDigits:2,maximumFractionDigits:2}).format(value);
+function valuationLabel(rows) {
+  if(rows.length&&rows.every(x=>x.estimatedCop===null))return "Sin tarifa configurada";
+  const value=rows.reduce((sum,x)=>sum+(x.estimatedCop??0n),0n);
+  return metalCop(value)+(rows.some(x=>x.estimatedCop===null)?" · parcial, falta tarifa":"");
+}
 function goldPage() {
-  const balances = getBalances(),
+  const valuation=N.metalValuation(getBalances(),S.settings.rate),balances = valuation.rows,
     q = filters.ledgerAccount || "",
     m = filters.ledgerMetal || "",
     p = filters.ledgerPurity || "",
@@ -1508,18 +1514,23 @@ function goldPage() {
       "Las existencias de cada metal se muestran por separado. El fino no se suma entre metales distintos.",
       "blue",
     ) +
+    `<section id="metal-valuation" class="section-gap"><div class="kpis">${kpi("Valor general en taller",valuationLabel(balances),"Todas las ubicaciones · tarifas actuales","gold",true)}${kpi("Valor del metal propio",valuationLabel(balances.filter(x=>x.owner==="taller")),"Patrimonio del taller · COP","chart")}${kpi("Valor del metal de clientes",valuationLabel(balances.filter(x=>x.owner!=="taller")),"Custodia y trabajo · propiedad de clientes","shield")}</div><p class="muted section-gap">Valoración estimada: gramos finos de cada metal × su tarifa actual en Configuración. Incluye solo las existencias actuales, sin duplicar los traslados entre ubicaciones.</p>${valuation.missing.length?notice("Valoración incompleta","Falta configurar una tarifa mayor que cero para: "+valuation.missing.map(id=>metals().find(x=>x.id===id)?.name||id).join(", ")+". Estos metales conservan sus gramos y no se consideran de valor cero.","amber"):""}</section>`+
+    card("Valor por metal","Total de cada metal en todas las ubicaciones del taller.",table(["Metal","Peso bruto","Fino","Tarifa COP / g fino","Propio COP","Clientes COP","Total COP"],[...new Set(balances.map(x=>x.metal))].map(id=>{
+      const rows=balances.filter(x=>x.metal===id);
+      return tr([E(metals().find(x=>x.id===id)?.name||id),weight(rows.reduce((sum,x)=>sum+x.mg,0)),fine(rows.reduce((sum,x)=>sum+x.fineUg,0)),S.settings.rate[id]>0?cop(S.settings.rate[id]):"Sin tarifa",valuationLabel(rows.filter(x=>x.owner==="taller")),valuationLabel(rows.filter(x=>x.owner!=="taller")),valuationLabel(rows)]);
+    }).join(""),"Las existencias registradas aparecerán aquí con su valoración."))+
     `<div class="grid three">${Object.entries(ACC)
       .map(([acc, label]) => {
         const b = balances.filter((x) => x.account === acc);
-        return `<section class="card account-card" ${acc === "own" ? 'style="background:var(--green);color:white"' : ""}><div class="kpi-label" ${acc === "own" ? 'style="color:#d0deca"' : ""}>${E(label)}${icon("gold")}</div>${
+        return `<section class="card account-card section-gap" data-metal-account="${acc}" ${acc === "own" ? 'style="background:var(--green);color:white"' : ""}><div class="kpi-label" ${acc === "own" ? 'style="color:#d0deca"' : ""}>${E(label)}${icon("gold")}</div><div class="section-gap"><small>Valor total de esta ubicación</small><div class="kpi-value" data-account-value>${valuationLabel(b)}</div></div>${
           b.length
-            ? metals().map((x) => x.id)
+            ? [...new Set(b.map(x=>x.metal))]
                 .filter((m) => b.some((x) => x.metal === m))
                 .map((m) => {
                   const bs = b.filter((x) => x.metal === m),
                     mg = bs.reduce((v, x) => v + x.mg, 0),
                     ug = bs.reduce((v, x) => v + x.fineUg, 0);
-                  return `<div class="kpi-value">${weight(mg)} <span style="font-size:11px">${E(m)}</span></div><small>${fine(ug)} · ${cop((ug * S.settings.rate[m]) / 1e6)}</small>`;
+                  return `<div class="kpi-value">${weight(mg)} <span style="font-size:11px">${E(m)}</span></div><small>${fine(ug)} · ${valuationLabel(bs)}</small>`;
                 })
                 .join("")
             : '<div class="kpi-value">0,000 g</div><small>Sin existencias registradas</small>'
@@ -1568,7 +1579,7 @@ function goldPage() {
         )
         .join(""),
       "No hay movimientos que coincidan con los filtros.",
-    )}</section>${card("Existencias detalladas", "Conciliación por metal, ley y propietario.", table(["Cuenta", "Metal", "Ley", "Propietario", "Bruto", "Fino"], balances.map((x) => tr([E(ACC[x.account]), E(x.metal), x.purity, x.owner === "taller" ? "Taller" : E(find("orders", x.owner)?.code || "Cliente"), weight(x.mg), fine(x.fineUg)])).join("")))}`
+    )}</section>${card("Existencias detalladas", "Conciliación por metal, ley y propietario.", table(["Cuenta", "Metal", "Ley", "Propietario", "Bruto", "Fino", "Valor estimado COP"], balances.map((x) => tr([E(ACC[x.account]), E(x.metal), x.purity, x.owner === "taller" ? "Taller" : E(find("orders", x.owner)?.code || "Cliente"), weight(x.mg), fine(x.fineUg), valuationLabel([x])])).join("")))}`
   );
 }
 function productionPage() {

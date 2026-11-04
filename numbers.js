@@ -76,5 +76,24 @@
     if (value > 1000000000000n) throw new Error("El importe supera el máximo de un billón de COP.");
     return Number(value);
   }
-  return { format, parse, editing, tax, weightPrice };
+  function metalValuation(balances, rates) {
+    const rows=balances.map(row=>({...row,estimatedCop:null})),known=[];
+    let numerator=0n,base=0n;
+    rows.forEach((row,index)=>{
+      if(!Number.isSafeInteger(row.fineUg)||row.fineUg<0)throw new Error("Saldo de metal inválido para valorar.");
+      const rate=rates[row.metal];
+      if(!Number.isSafeInteger(rate)||rate<=0)return;
+      const product=BigInt(row.fineUg)*BigInt(rate),value=product/1000000n;
+      row.estimatedCop=value;numerator+=product;base+=value;
+      known.push({index,remainder:product%1000000n});
+    });
+    // Repartir el redondeo conserva la suma de los detalles, las ubicaciones y el total.
+    const total=(numerator+500000n)/1000000n;
+    const extra=Number(total-base);
+    known.sort((a,b)=>a.remainder===b.remainder?a.index-b.index:a.remainder>b.remainder?-1:1);
+    for(let i=0;i<extra;i++)rows[known[i].index].estimatedCop++;
+    const own=rows.filter(row=>row.owner==="taller").reduce((sum,row)=>sum+(row.estimatedCop??0n),0n);
+    return {rows,total,own,clients:total-own,missing:[...new Set(rows.filter(row=>row.estimatedCop===null).map(row=>row.metal))]};
+  }
+  return { format, parse, editing, tax, weightPrice, metalValuation };
 });

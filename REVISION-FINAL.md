@@ -29,6 +29,12 @@ Los casos ejecutados terminan sin fallos. Las pruebas no equivalen a una garant�
 
 La balanza física queda fuera de esta revisión, según lo acordado. No se simulan ventas, gastos ni devoluciones sobre la base de datos de producción. La publicación se hace únicamente en `charlesjoyas/Tjoyero`; la preparación de Vercel incluye los módulos utilizados por el servidor.
 
+## Valor monetario del Libro de metales — 4 de noviembre de 2026
+
+Se muestran el valor general, el metal propio y el de clientes, el desglose por metal y el total en cada ubicación. Las existencias detalladas incluyen una columna de valor estimado por ley y propietario. La valoración usa el fino de cada metal y su tarifa actual en Configuración; no duplica traslados, no suma pesos finos entre metales distintos y no incorpora pérdidas ni metal ya entregado.
+
+Se calculan los importes con enteros de precisión arbitraria y se distribuye el redondeo para que los detalles concilien con los subtotales y el total. Los metales sin tarifa se identifican y la valoración queda marcada como parcial. Las pruebas verifican propiedad, distintas tarifas, movimientos internos, cifras grandes y diseño en móvil. Consultar la valoración no modifica el inventario.
+
 ## Órdenes de compra de oro por categoría — 4 de noviembre de 2026
 
 Se integra la compra de una o varias categorías activas de oro en una orden con proveedor, documento, vencimiento, peso recibido y precio por gramo de cada categoría. La confirmación ingresa el metal inmediatamente a bodega por su ley y registra una cuenta por pagar, sin descontar caja hasta pagar al proveedor. El importe se calcula de forma exacta sobre los gramos recibidos y se conserva el fino en el libro de metales. El catálogo puede modificarse o eliminar categorías sin cambiar el historial de las compras.
