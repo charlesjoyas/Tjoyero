@@ -42,6 +42,31 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     const waiting=page.waitForEvent("download");await page.locator('[data-action="export-transfer"]').click();const download=await waiting;
     const book=new(require("../exceljs.min.js").Workbook)();await book.xlsx.load(fs.readFileSync(await download.path()));
     assert.equal(book.worksheets[0].getCell("F2").value,"oro + plata");assert.match(book.worksheets[0].getCell("N2").value,/plata/);assert.equal(book.worksheets[0].getCell("I2").value,50001);
+    await act("inventory.adjust",{account:"own",metal:"oro",purity:715,weight:7,reason:"Saldo inicial"});
+    await act("inventory.adjust",{account:"own",metal:"oro",purity:999,weight:10,reason:"Saldo inicial"});
+    const differentLaw = await act("order.create",{
+      clientId:client.id,type:"Fabricación",description:"Oro de bodega",condition:"Sin custodia",
+      metal:"oro",purity:916,receivedWeight:0,dueDate:"2026-12-01",
+    });
+    await page.goto(base+"/#orders/"+differentLaw.id);
+    await page.reload();
+    await page.locator('[data-action="assign-order"]').click();
+    const law = form.locator('[name="ownPurity"]');
+    assert.equal(await law.inputValue(),"916");
+    assert.match(await law.locator('option[value="916"]').innerText(),/0,000 g/);
+    assert.match(await law.locator('option[value="715"]').innerText(),/7,000 g/);
+    await law.selectOption("715");
+    await form.locator('[name="source"]').selectOption("melt");
+    assert.equal(await law.inputValue(),"715");
+    assert.match(await law.locator('option[value="715"]').innerText(),/0,000 g/);
+    await form.locator('[name="source"]').selectOption("own");
+    await form.locator('[name="ownWeight"]').fill("2");
+    await submit();
+    s=await state();
+    assert.equal(s.orders.find(order=>order.id===differentLaw.id).allocations[0].purity,715);
+    assert.equal(D.balance(s,"own","oro",715),5000);
+    assert.equal(D.balance(s,"own","oro",999),10000);
+    assert.equal(D.balance(s,"process","oro",916),0);
     assert.deepEqual(errors,[]);console.log("Metales propios UI: añadir/quitar, existencias, varias leyes, retorno, entrega, composición de piezas, traslado, Excel, recarga y móvil correctos.");
   }finally{if(browser)await browser.close();await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

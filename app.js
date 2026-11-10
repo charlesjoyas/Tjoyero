@@ -2514,6 +2514,14 @@ function updateAssignmentAvailability() {
     $("[data-assignment-available]",row).textContent="Disponible en el origen: "+weight(balance(source,metal,purity));
   });
 }
+function assignmentPurityOptions(balances, orderPurity, source, selected = orderPurity) {
+  const available = balances.filter(row => row.account === source);
+  const laws = [...new Set([orderPurity, Number(selected), ...available.map(row => row.purity)])];
+  return laws.map(law => [
+    law,
+    "Ley " + number(law) + " · " + weight(available.find(row => row.purity === law)?.mg ?? 0) + " disponibles",
+  ]);
+}
 function assignOrder(id) {
   const o = find("orders", id);
   if (!S.smiths.length)
@@ -2526,11 +2534,12 @@ function assignOrder(id) {
       ),
     );
   assignmentMetalIndex=0;
+  const stock = getBalances().filter(row => row.owner === "taller" && row.metal === o.metal && row.mg > 0);
   modal(
     "Asignar a mesa · " + o.code,
     notice(
       `${o.metal} · Ley ${number(o.purity)}`,
-      `Custodia disponible: ${weight(balance("custody", o.metal, o.purity, o.id))}. Propio en bodega: ${weight(balance("own", o.metal, o.purity))}.`,
+      `Custodia del cliente disponible: ${weight(balance("custody", o.metal, o.purity, o.id))}. Para metal propio, elige el origen y la ley que pesaste.`,
       "blue",
     ) +
       notice("Al confirmar se registra la salida de inventario", "Los gramos de metal propio salen del origen elegido y pasan a la mesa de trabajo. El metal del cliente sale de su custodia, sin reducir tu bodega propia.", "blue") +
@@ -2539,7 +2548,7 @@ function assignOrder(id) {
         "Orfebre",
         S.smiths.map((x) => [x.id, x.name + " · " + x.bench]),
         "",
-      )}${moneyField("smithFee", "Honorarios de este trabajo · COP", 0)}${weightField("customerWeight", "Metal del cliente a mesa (g)", balance("custody", o.metal, o.purity, o.id) / 1000, true)}${weightField("ownWeight", "Metal propio a mesa (g)", 0, true)}<div class="span-2">${select(
+      )}${moneyField("smithFee", "Honorarios de este trabajo · COP", 0)}<div class="span-2">${weightField("customerWeight", "Metal del cliente a mesa (g)", balance("custody", o.metal, o.purity, o.id) / 1000, true)}</div>${select(
         "source",
         "Origen del metal propio",
         [
@@ -2548,11 +2557,18 @@ function assignOrder(id) {
           ["melt", "Fundido / aleado"],
         ],
         "own",
-      )}</div><div class="span-2"><div id="assignment-metals"></div>${button("Añadir otro metal propio","add-assignment-metal","plus","small")}</div></div>`,
-    (b,form,key)=>mutate("order.assign",{id,smithId:b.smithId,smithFee:b.smithFee,customerWeight:b.customerWeight,ownWeight:b.ownWeight,source:b.source,
+      )}${select("ownPurity", "Ley del metal propio", assignmentPurityOptions(stock, o.purity, "own"), o.purity)}${weightField("ownWeight", "Metal propio a mesa (g)", 0, true)}<div class="span-2"><div id="assignment-metals"></div>${button("Añadir otro metal propio","add-assignment-metal","plus","small")}</div></div>`,
+    (b,form,key)=>mutate("order.assign",{id,smithId:b.smithId,smithFee:b.smithFee,customerWeight:b.customerWeight,ownWeight:b.ownWeight,ownPurity:b.ownPurity,source:b.source,
       ownMetals: $$(".own-assignment-row",form).map(row=>{const i=row.dataset.metalIndex;return {metal:b["ownMetal-"+i],purity:b["ownPurity-"+i],weight:b["ownWeight-"+i],source:b["ownSource-"+i]};})},key),
     "Registrar salida y asignar",
   );
+  const form = $("#modal-form");
+  form.elements.source.addEventListener("change", () => {
+    const law = form.elements.ownPurity;
+    const selected = law.value;
+    const options = assignmentPurityOptions(stock, o.purity, form.elements.source.value, selected);
+    law.innerHTML = options.map(([value, label]) => option(value, label, selected)).join("");
+  });
   $("#modal-form").addEventListener("input",updateAssignmentAvailability);
   $("#modal-form").addEventListener("change",updateAssignmentAvailability);
 }
@@ -2810,7 +2826,7 @@ function adjustMetal() {
     "inventory.adjust",
     notice(
       "El ajuste conserva su motivo en auditoría",
-      "Para una existencia inicial, ingresa el peso real y escribe «Saldo inicial» con el soporte.",
+      "Ingresa el total físico de esa cuenta, metal y ley. El conteo deja ese saldo final. Para una existencia inicial, escribe «Saldo inicial» con el soporte.",
       "amber",
     ) +
       `<div class="form-grid">${select(

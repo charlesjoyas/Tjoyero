@@ -599,7 +599,7 @@ function execute(s, action, b, a) {
       const extra = b.ownMetals ?? [];
       assert(Array.isArray(extra) && extra.length <= 50, "Añade hasta 50 aportes de metal propio.");
       const contributions = [
-        ...(own ? [{ metal: o.metal, purity: o.purity, mg: own, source }] : []),
+        ...(own ? [{ metal: o.metal, purity: purity(b.ownPurity ?? o.purity), mg: own, source }] : []),
         ...extra.map(x => {
           assert(x && typeof x === "object", "Aporte de metal inválido.");
           assert(["own", "payment", "melt"].includes(x.source || "own"), "Origen no válido.");
