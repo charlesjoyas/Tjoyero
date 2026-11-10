@@ -1145,6 +1145,7 @@ function execute(s, action, b, a) {
     case "cash.entry": {
       permit(a, "cash");
       const shift = openShift(s);
+      assert(b.shiftId === undefined || b.shiftId === shift.id, "El turno cambió. Cierra el formulario y vuelve a abrirlo.", 409);
       const value = money(b.amount, "Importe");
       assert(value > 0, "El importe debe ser mayor que cero.");
       assert(

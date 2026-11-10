@@ -167,8 +167,19 @@ const assert = require("node:assert/strict");
       path: path.join(__dirname, "../test-results/caja-mixta.png"),
       fullPage: true,
     });
+    await click("cash-entry");
+    await page.locator("#modal-form [name=amount]").fill("25.000");
+    await page.locator("#modal-form [name=note]").fill("Ingreso de prueba");
+    assert.match(await page.locator("#cash-income-preview").innerText(), /125\.000,00/);
+    await submit();
+    await page.reload();
+    const income = page.locator("tr").filter({ hasText: "Ingreso de prueba" });
+    await income.waitFor();
+    assert.equal(await income.count(), 1);
+    assert.match(await income.innerText(), /Ingreso adicional/);
     await click("close-shift");
-    await page.locator("[name=counted]").fill("100000");
+    assert.match(await page.locator("[name=expected]").inputValue(), /125\.000,00/);
+    await page.locator("[name=counted]").fill("125000");
     await page.locator('[name="gold-0"]').fill("2");
     await page.locator('[name="gold-1"]').fill("3");
     await page.locator("[name=receiver]").fill("Bodeguero");
@@ -229,6 +240,8 @@ const assert = require("node:assert/strict");
       .state;
     assert.equal(s.shifts.length, 3);
     assert(s.shifts.every((x) => x.closedAt));
+    assert.equal(s.shifts.at(-1).expected, 125000);
+    assert.equal(s.shifts.at(-1).difference, 0);
     assert.equal(s.payments.length, 1);
     assert.deepEqual(errors, []);
     console.log(

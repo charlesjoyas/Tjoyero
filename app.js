@@ -1866,7 +1866,7 @@ function cashPage() {
               .map((x) =>
                 tr([
                   dt(x.at),
-                  E(measurementNote(x.note)),
+                  E(measurementNote(x.note)) + (x.ref === "CAJA" && x.amount > 0 ? "<small>Ingreso adicional</small>" : ""),
                   `<span style="color:${x.amount < 0 ? "var(--red)" : "var(--green)"}">${x.amount < 0 ? "−" : "+"}${cop(Math.abs(x.amount))}</span>`,
                   x.reversedAt ? reversalBadge(x) : x.expenseId ? reversalButton("expense",x.expenseId) : x.ref === "CAJA" ? reversalButton("cash",x.id) : "",
                 ]),
@@ -2728,6 +2728,38 @@ function updateShiftOpening() {
     row("Base de oro", weight(mg)) +
     (withGold ? row("Oro fino equivalente", fine(ug)) : "") +
     "<small>El efectivo y el oro se arquean por separado al cerrar.</small>";
+}
+function additionalCashIncome() {
+  const shift = currentShift();
+  if (!shift) throw new Error("Abre un turno para registrar el ingreso.");
+  modal(
+    "Ingreso adicional de caja · " + shift.code,
+    `<div class="form-grid">${moneyField("amount", "Efectivo recibido · COP", "")}${field("note", "Concepto y soporte", "text", "", 'required maxlength="1000"')}<div id="cash-income-preview" class="calculator span-2" data-shift-id="${E(shift.id)}"></div></div>`,
+    async (data, form, key) => {
+      try {
+        return await mutate("cash.entry", { ...data, type: "income", shiftId: shift.id }, key);
+      } catch (error) {
+        updateCashIncomePreview();
+        throw error;
+      }
+    },
+    "Registrar ingreso en caja",
+  );
+  updateCashIncomePreview();
+}
+function updateCashIncomePreview() {
+  const preview = $("#cash-income-preview");
+  if (!preview) return;
+  const shift = currentShift();
+  if (!shift || shift.id !== preview.dataset.shiftId) {
+    preview.textContent = "El turno cambió. Cierra el formulario y vuelve a abrirlo.";
+    return;
+  }
+  const before = expectedCash(shift);
+  const income = numericValue($("#modal-form").elements.amount);
+  preview.innerHTML =
+    row("Efectivo esperado antes del ingreso", cop(before)) +
+    row("Efectivo esperado después del ingreso", cop(before + income), "total");
 }
 function closeShift() {
   const shift = currentShift(),
@@ -3839,20 +3871,7 @@ async function handleAction(action, id, el) {
       closeShift();
       break;
     case "cash-entry":
-      simpleModal(
-        "Ingreso adicional de caja",
-        "cash.entry",
-        `<div class="form-grid">${select(
-          "type",
-          "Movimiento",
-          [
-            ["income", "Ingreso adicional"],
-          ],
-          "income",
-        )}${moneyField("amount", "Importe · COP", "")}<div class="span-2">${field("note", "Concepto y soporte", "text", "", 'required maxlength="1000"')}</div></div>`,
-        {},
-        "Registrar movimiento",
-      );
+      additionalCashIncome();
       break;
     case "reset-expense-filters":
       for (const key of ["expenseFrom","expenseTo","expenseMethod","expenseCategory"]) delete filters[key];
@@ -4305,6 +4324,7 @@ function updateModalCalculations(el) {
   if (!f) return;
   const b = inputData(f);
   if($("#expense-preview",f))updateExpensePreview();
+  if ($("#cash-income-preview", f)) updateCashIncomePreview();
   if (el.name?.startsWith("orderMetalPrice-")) updateInlineMetalTotal(f);
   if ($("#labor-preview", f)) updateLaborPreview();
   if ($("#opening-preview")) updateShiftOpening();
