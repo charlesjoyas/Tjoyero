@@ -2,6 +2,9 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const N = require("../numbers.js");
+test("El valor del fino redondea exactamente antes de mostrar y guardar el cobro", () => {
+  assert.equal(N.finePrice(987654, 999999981006), 987653981240);
+});
 test("Formato colombiano agrupa miles y muestra decimales sin alterar valores", () => {
   assert.equal(N.format(1234567), "1.234.567,00");
   assert.equal(N.format(0), "0,00");

@@ -36,7 +36,69 @@ test("Restaurar una copia anterior reemplaza gastos y reversiones, sin mezclar e
       const rejected=await action("backup.restore",{backup:bad,password:"1234"});
       assert.equal(rejected.status,400,JSON.stringify(rejected.body));assert.deepEqual((await get("/api/state")).state,after);
     }
+    await action("shift.open", { opening: 100000 });
+    await action("cash.entry", { type: "income", amount: 1500000, note: "Ingreso de prueba" });
+    await action("shift.close", { counted: 1600000 });
+    const closed = await get("/api/backup");
+    const current = (await get("/api/state")).state;
+    for (const corrupt of [
+      copy => { copy.state.shifts[0].expected -= 1500000; },
+      copy => { copy.state.shifts[0].opening = "100000"; },
+      copy => { copy.state.counters.shift = 0; },
+      copy => { copy.audit[0].details = "{"; },
+      copy => { copy.audit[0].details = "null"; },
+    ]) {
+      const copy = structuredClone(closed);
+      corrupt(copy);
+      const { checksum, ...content } = copy;
+      copy.checksum = createHash("sha256").update(JSON.stringify(content)).digest("hex");
+      const result = await action("backup.restore", { backup: copy, password: "1234" });
+      assert.equal(result.status, 400, JSON.stringify(result.body));
+      assert.deepEqual((await get("/api/state")).state, current);
+    }
+    assert.equal((await action("backup.restore", { backup: closed, password: "1234" })).status, 200);
   } finally {await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
+});
+test("Caja: un formulario anterior no puede cargar pagos al nuevo turno", () => {
+  const s = D.initialState(), actor = { role: "admin", name: "Admin" };
+  const act = (action, data) => D.execute(s, action, data, actor);
+  const client = act("client.save", { name: "Cliente" });
+  const order = act("order.create", {
+    clientId: client.id, type: "Reparación", description: "Pieza", condition: "Recibida",
+    metal: "oro", purity: 750, receivedWeight: 1, dueDate: "2026-12-01", labor: 30000,
+  });
+  const oldShift = act("shift.open", { opening: 100000 });
+  act("payment.create", { orderId: order.id, cash: 10000, shiftId: oldShift.id });
+  act("shift.close", { counted: 110000 });
+  const newShift = act("shift.open", { opening: 110000 });
+  for (const action of ["payment.create", "payment.refund"]) {
+    assert.throws(() => act(action, {
+      orderId: order.id, shiftId: oldShift.id, cash: 10000, reason: "Devolución",
+    }), error => error.status === 409);
+  }
+  assert.equal(D.cashExpected(s, newShift), 110000);
+  assert.equal(s.payments.length, 1);
+  act("payment.create", { orderId: order.id, cash: 10000, shiftId: newShift.id });
+  assert.equal(D.cashExpected(s, newShift), 120000);
+  D.validateState(s);
+});
+test("Retorno: distribuye el miligramo residual al propietario correcto incluso con cargas grandes", () => {
+  const s = D.initialState(), actor = { role: "admin", name: "Admin" };
+  const act = (action, data) => D.execute(s, action, data, actor);
+  const client = act("client.save", { name: "Cliente" });
+  const smith = act("smith.save", { name: "Orfebre" });
+  const order = act("order.create", {
+    clientId: client.id, type: "Reparación", description: "Pieza", condition: "Recibida",
+    metal: "oro", purity: 750, receivedWeight: 499999.999, dueDate: "2026-12-01",
+  });
+  act("inventory.adjust", { account: "own", metal: "oro", purity: 750, weight: 499999.938, reason: "Prueba" });
+  act("order.assign", { id: order.id, smithId: smith.id, customerWeight: 499999.999, ownWeight: 499999.938 });
+  act("inventory.adjust", { account: "own", metal: "oro", purity: 750, weight: 1, reason: "Prueba" });
+  assert.throws(() => act("order.addMetal", { id: order.id, weight: 0.064, reason: "Aporte" }), /máximo/);
+  assert.equal(D.balance(s, "own", "oro", 750), 1000);
+  act("order.return", { id: order.id, pieceWeight: 639344.222, reason: "Retorno verificado" });
+  assert.deepEqual(order.returned.pieces, [319672130, 319672092]);
+  D.validateState(s);
 });
 test("Impuestos: redondeo exacto de medio peso con porcentajes de dos decimales",()=>{
   const s=D.initialState(),a={role:"admin",name:"Admin"};
@@ -74,6 +136,18 @@ test("Honorarios: no registra una liquidación bancaria que supere el límite mo
   ownProduction(s,a,smith,1,600000000000);ownProduction(s,a,smith,1,600000000000);
   assert.throws(()=>D.execute(s,"smith.settle",{smithId:smith.id,method:"bank",reference:"Banco"},a),/honorarios.*rango/i);
   assert.equal(s.settlements.length,0);
+});
+test("Honorarios: si aparecen trabajos nuevos exige revisar el total antes de pagar", () => {
+  const s = D.initialState(), actor = { role: "admin", name: "Admin" };
+  const smith = D.execute(s, "smith.save", { name: "Orfebre" }, actor);
+  D.execute(s, "inventory.adjust", { account: "own", metal: "oro", purity: 750, weight: 2, reason: "Prueba" }, actor);
+  const reviewed = ownProduction(s, actor, smith, 1, 20000);
+  const next = ownProduction(s, actor, smith, 1, 30000);
+  const payment = { smithId: smith.id, method: "bank", reference: "Banco" };
+  assert.throws(() => D.execute(s, "smith.settle", { ...payment, orderIds: [reviewed.id] }, actor),
+    error => error.status === 409);
+  assert.equal(s.settlements.length, 0);
+  assert.equal(D.execute(s, "smith.settle", { ...payment, orderIds: [reviewed.id, next.id] }, actor).amount, 50000);
 });
 test("Insumos: conserva el costo exacto al consumir cantidades decimales",()=>{
   const s=D.initialState(),a={role:"admin",name:"Admin"};

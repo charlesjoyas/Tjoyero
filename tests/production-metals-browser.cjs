@@ -67,6 +67,16 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     assert.equal(D.balance(s,"own","oro",715),5000);
     assert.equal(D.balance(s,"own","oro",999),10000);
     assert.equal(D.balance(s,"process","oro",916),0);
+    await page.goto(base+"/#gold");
+    await page.locator('[data-action="adjust-metal"]').click();
+    await form.locator('[name="weight"]').fill("8");
+    await form.locator('[name="reason"]').fill("Conteo de prueba");
+    await act("inventory.adjust",{account:"own",metal:"oro",purity:750,weight:12,reason:"Cambio en otra sesión"});
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await form.locator('button[type="submit"]').click();
+      await form.getByText(/Los datos cambiaron durante el conteo/).waitFor();
+    }
+    assert.equal(D.balance(await state(),"own","oro",750),12000);
     assert.deepEqual(errors,[]);console.log("Metales propios UI: añadir/quitar, existencias, varias leyes, retorno, entrega, composición de piezas, traslado, Excel, recarga y móvil correctos.");
   }finally{if(browser)await browser.close();await new Promise(r=>app.server.close(r));fs.rmSync(dir,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

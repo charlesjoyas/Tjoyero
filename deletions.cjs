@@ -6,7 +6,8 @@ module.exports=function removeOperation(s,b,a,D){
   const reason=str(b.reason,"Motivo de eliminación",1000),reference=str(b.reference,"Soporte",200,false);
   const collections={gemLot:"gemstoneLots",expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",payment:"payments",order:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
   const repeatable=["sale","assignment","quality"];
-  assert(collections[b.type]||repeatable.includes(b.type)||b.type==="stockTransfer","Esta operación no admite eliminación.");
+  const collection=Object.hasOwn(collections,b.type)?collections[b.type]:null;
+  assert(collection||repeatable.includes(b.type)||b.type==="stockTransfer","Esta operación no admite eliminación.");
   let reversal;
   if(b.reversalId){
     reversal=(s.reversals||[]).find(x=>x.id===b.reversalId);
@@ -14,7 +15,7 @@ module.exports=function removeOperation(s,b,a,D){
     assert(!reversal.deletedAt,"La operación ya fue eliminada.",409);
   }
   let source;
-  if(collections[b.type])source=get(s,collections[b.type],b.id);
+  if(collection)source=get(s,collection,b.id);
   else if(b.type==="stockTransfer")source=s.stock.flatMap(x=>x.transfers).find(x=>x.id===b.id);
   if(!repeatable.includes(b.type))assert(source&&!source.deletedAt,"El registro no existe o ya fue eliminado.",409);
   if(reversal&&source)assert(source.reversedAt||source.voidedAt||(b.type==="order"&&source.status==="cancelled"),"El registro sigue vigente: debe compensarse antes de eliminarlo.",409);

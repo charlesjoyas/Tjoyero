@@ -82,12 +82,11 @@ function materialQuantity(v, label = "Cantidad", min = 0) {
   return x;
 }
 function metalValue(mg, p, r) {
-  const v = (BigInt(mg) * BigInt(p) * BigInt(r) + 500000n) / 1000000n;
-  assert(
-    v <= 1000000000000n,
-    "La valoración supera el máximo permitido de un billón de COP.",
-  );
-  return Number(v);
+  try {
+    return Numbers.finePrice(mg * p, r);
+  } catch (error) {
+    fail(error.message);
+  }
 }
 function grams(v, label = "Peso", zero = false) {
   const x = num(v, label, zero ? 0 : 0.001, 1000000);
@@ -254,9 +253,10 @@ function paid(s, o) {
 function due(s, o) {
   return total(o) - paid(s, o);
 }
-function openShift(s) {
+function openShift(s, shiftId) {
   const x = s.shifts.find((x) => !x.closedAt);
   assert(x, "Abre un turno de caja antes de registrar este movimiento.");
+  assert(shiftId === undefined || shiftId === x.id, "El turno de caja cambió. Vuelve a abrir el formulario.", 409);
   return x;
 }
 function rate(s, m) {
@@ -361,10 +361,12 @@ function allocate(amount, caps) {
   const sum = caps.reduce((a, b) => a + b, 0);
   assert(amount <= sum, "Distribución de metal inválida.");
   if (!sum) return caps.map(() => 0);
-  const result = caps.map((x) => Math.floor((amount * x) / sum));
+  const divisor = BigInt(sum);
+  const products = caps.map(cap => BigInt(amount) * BigInt(cap));
+  const result = products.map(product => Number(product / divisor));
   let rest = amount - result.reduce((a, b) => a + b, 0);
-  const order = caps
-    .map((x, i) => ({ i, fraction: (amount * x) % sum }))
+  const order = products
+    .map((product, i) => ({ i, fraction: Number(product % divisor) }))
     .sort((a, b) => b.fraction - a.fraction);
   for (const x of order)
     if (rest && result[x.i] < caps[x.i]) {
@@ -747,6 +749,8 @@ function execute(s, action, b, a) {
         reason = str(b.reason, "Motivo del aporte", 1000),
         source = b.source || "own";
       assert(["own", "payment", "melt"].includes(source), "Origen no válido.");
+      assert(o.allocations.reduce((total, item) => total + item.mg, mg) <= 1000000000,
+        "El aporte supera el máximo de 1.000.000 g de metal a mesa por orden.");
       move(
         s,
         a,
@@ -895,12 +899,12 @@ function execute(s, action, b, a) {
         o.type !== "Producción propia",
         "La producción propia no recibe cobros de clientes.",
       );
-      const shift = openShift(s);
+      const shift = openShift(s, b.shiftId);
       const cashValue = money(b.cash ?? 0, "Efectivo"),
         bank = money(b.bank ?? 0, "Transferencia"),
         weight = grams(b.goldWeight ?? 0, "Metal como pago", true),
         m = metal(b.metal || "oro", s),
-        p = purity(b.purity || 750);
+        p = purity(b.purity ?? 750);
       const official = weight ? rate(s, m) : 0,
         r = weight ? money(b.rate ?? official, "Tarifa aplicada") : 0;
       assert(
@@ -1018,7 +1022,7 @@ function execute(s, action, b, a) {
         !["delivered", "cancelled"].includes(o.status),
         "La orden está cerrada.",
       );
-      const shift = openShift(s),
+      const shift = openShift(s, b.shiftId),
         cashOut = money(b.cash ?? 0, "Devolución en efectivo"),
         bankOut = money(b.bank ?? 0, "Devolución por transferencia"),
         amount = cashOut + bankOut;
@@ -1144,8 +1148,7 @@ function execute(s, action, b, a) {
     }
     case "cash.entry": {
       permit(a, "cash");
-      const shift = openShift(s);
-      assert(b.shiftId === undefined || b.shiftId === shift.id, "El turno cambió. Cierra el formulario y vuelve a abrirlo.", 409);
+      const shift = openShift(s, b.shiftId);
       const value = money(b.amount, "Importe");
       assert(value > 0, "El importe debe ser mayor que cero.");
       assert(
@@ -1176,8 +1179,7 @@ function execute(s, action, b, a) {
         assert(b.method==="cash"&&amount===-entry.amount,"El medio y el valor deben coincidir con la salida original.");
         x.cashEntryId=entry.id;x.shiftId=entry.shiftId;x.classifiedFromCash=true;entry.expenseId=x.id;
       } else if(x.method==="cash") {
-        const shift=openShift(s);
-        assert(b.shiftId===undefined||b.shiftId===shift.id,"El turno de caja cambió. Abre nuevamente el formulario y revisa el gasto.",409);
+        const shift=openShift(s,b.shiftId);
         cash(s,a,shift,-amount,"Gasto "+x.code+" · "+x.concept,x.code);
         const entry=s.cashEntries.at(-1);entry.expenseId=x.id;x.cashEntryId=entry.id;x.shiftId=shift.id;
       }
@@ -1185,12 +1187,7 @@ function execute(s, action, b, a) {
     }
     case "shift.close": {
       permit(a, "cash");
-      const shift = openShift(s);
-      assert(
-        b.shiftId === undefined || b.shiftId === shift.id,
-        "El turno de este formulario ya cambió. Cierra el formulario y revisa el turno actual antes de arquear.",
-        409,
-      );
+      const shift = openShift(s, b.shiftId);
       const expected = cashExpected(s, shift),
         counted = money(b.counted, "Efectivo contado");
       const gold = cashMetals(s);
@@ -1430,7 +1427,7 @@ function execute(s, action, b, a) {
       const ref = str(b.reference, "Referencia / comprobante", 200);
       let shiftId = null;
       if (b.method === "cash") {
-        const shift = openShift(s);
+        const shift = openShift(s, b.shiftId);
         shiftId = shift.id;
         cash(s, a, shift, -amount, "Pago proveedor " + p.code, p.code);
       }
@@ -1691,6 +1688,11 @@ function execute(s, action, b, a) {
           !s.settlements.some((x) => !x.reversedAt && x.orderIds.includes(o.id)),
       );
       assert(orders.length, "No hay honorarios pendientes de liquidación.");
+      if (b.orderIds !== undefined) {
+        const reviewed = new Set(Array.isArray(b.orderIds) ? b.orderIds : []);
+        assert(reviewed.size === orders.length && orders.every(order => reviewed.has(order.id)),
+          "Los honorarios pendientes cambiaron. Vuelve a abrir el formulario y revisa el total.", 409);
+      }
       const amount = money(orders.reduce((v, o) => v + o.smithFee, 0),"Total de honorarios");
       assert(amount > 0, "Los honorarios asignados son cero.");
       const method = b.method;
@@ -1700,7 +1702,7 @@ function execute(s, action, b, a) {
         cash(
           s,
           a,
-          openShift(s),
+          openShift(s, b.shiftId),
           -amount,
           "Liquidación orfebre " + smith.name,
           "ORFEBRE",
@@ -1758,7 +1760,33 @@ function execute(s, action, b, a) {
       fail("Acción desconocida.", 404);
   }
 }
-function validateState(s) {
+function validateBackupSequences(s) {
+  const sequences = [
+    ["order", "T", s.orders.map(order => order.code)],
+    ["sale", "V", [
+      ...s.orders.map(order => order.invoice),
+      ...(s.reversals || []).filter(entry => entry.type === "sale").map(entry => entry.original?.invoice),
+    ].filter(Boolean)],
+    ["payment", "P", s.payments.map(payment => payment.code)],
+    ["shift", "CJ", s.shifts.map(shift => shift.code)],
+    ["expense", "G", (s.expenses || []).map(expense => expense.code)],
+    ["purchase", "CP", s.purchases.map(purchase => purchase.code)],
+    ["melt", "F", s.melts.map(melt => melt.code)],
+    ["stock", "JOY", s.stock.map(lot => lot.sku)],
+    ["stockTransfer", "TR", s.stock.flatMap(lot => lot.transfers.map(transfer => transfer.code))],
+    ["gemstone", "PG", (s.gemstoneLots || []).map(lot => lot.code)],
+  ];
+  for (const [key, prefix, codes] of sequences) {
+    assert(new Set(codes).size === codes.length, "La copia contiene códigos " + prefix + " duplicados.");
+    const format = new RegExp("^" + prefix + "-(\\d+)$");
+    for (const code of codes) {
+      const match = typeof code === "string" && code.match(format);
+      assert(match && Number(match[1]) > 0 && Number(match[1]) <= (s.counters[key] ?? 0),
+        "El contador " + prefix + " no concilia con los comprobantes de la copia.");
+    }
+  }
+}
+function validateState(s, { backup = false } = {}) {
   assert(
     s && typeof s === "object" && s.version === 1,
     "Base de datos no compatible.",
@@ -1859,6 +1887,7 @@ function validateState(s) {
     "Hay varios turnos abiertos.",
   );
   for (const shift of s.shifts) {
+    assert(Number.isSafeInteger(shift.opening), "La base de efectivo debe estar en pesos enteros.");
     money(shift.opening, "Base inicial de efectivo");
     if (shift.openingGold !== undefined) {
       assert(Array.isArray(shift.openingGold), "Base inicial de oro inválida.");
@@ -2052,12 +2081,22 @@ function validateState(s) {
   }
   for (const p of s.supplierPayments)
     assert(purchases.has(p.purchaseId), "Pago de compra inexistente.");
+  const cashTotals = new Map(s.shifts.map(shift => [shift.id, Number(shift.opening)]));
   for (const x of s.cashEntries) {
     assert(
       shifts.has(x.shiftId) && Number.isSafeInteger(x.amount),
       "Movimiento de caja inválido.",
     );
+    cashTotals.set(x.shiftId, money(cashTotals.get(x.shiftId) + x.amount, "Saldo histórico de caja"));
     if(x.expenseId!==undefined)assert(expensesByEntry.get(x.id)?.id===x.expenseId,"Salida de caja sin su gasto correspondiente.");
+  }
+  for (const shift of s.shifts) {
+    if (!shift.closedAt) continue;
+    assert(Number.isSafeInteger(shift.counted), "El conteo de efectivo debe estar en pesos enteros.");
+    const counted = money(shift.counted, "Efectivo contado al cierre");
+    const expected = cashTotals.get(shift.id);
+    assert(shift.expected === expected && shift.difference === counted - expected,
+      "El cierre de " + shift.code + " no concilia con sus movimientos de efectivo.");
   }
   const transferIds=new Set();
   for (const x of s.stock) {
@@ -2103,6 +2142,7 @@ function validateState(s) {
   }
   assert(defaultMetals().every((x) => metalIds.has(x.id)), "Faltan los metales base del taller.");
   Gems.validate(s,gemTools());
+  if (backup) validateBackupSequences(s);
   return s;
 }
 module.exports = {

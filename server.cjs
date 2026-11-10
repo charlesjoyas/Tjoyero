@@ -652,7 +652,24 @@ function createApp(options = {}) {
                     .digest("hex"),
                 "La copia está incompleta o fue modificada.",
               );
-              D.validateState(file.state);
+              D.validateState(file.state, { backup: true });
+              D.assert(file.audit === undefined || Array.isArray(file.audit), "Auditoría de copia inválida.");
+              for (const event of file.audit || []) {
+                D.assert(
+                  event && typeof event.at === "string" && Number.isFinite(Date.parse(event.at)) &&
+                    typeof event.actor === "string" &&
+                    typeof event.action === "string" &&
+                    typeof event.details === "string",
+                  "Auditoría de copia inválida.",
+                );
+                try {
+                  const details = JSON.parse(event.details);
+                  if (!details || typeof details !== "object" || Array.isArray(details))
+                    throw new Error("Detalle de auditoría inválido.");
+                } catch {
+                  D.fail("La copia contiene un evento de auditoría ilegible.");
+                }
+              }
               if (cloud)
                 await db.storeBackup(
                   "antes-de-restaurar-" + crypto.randomUUID(),
@@ -676,14 +693,6 @@ function createApp(options = {}) {
               if (Array.isArray(file.audit)) {
                 const statements = [];
                 for (const event of file.audit) {
-                  D.assert(
-                    event &&
-                      typeof event.at === "string" &&
-                      typeof event.actor === "string" &&
-                      typeof event.action === "string" &&
-                      typeof event.details === "string",
-                    "Auditoría de copia inválida.",
-                  );
                   statements.push({
                     sql: "INSERT INTO audit(at,actor,action,details) VALUES(?,?,?,?)",
                     args: [

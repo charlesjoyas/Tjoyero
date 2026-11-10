@@ -76,6 +76,15 @@
     if (value > 1000000000000n) throw new Error("El importe supera el máximo de un billón de COP.");
     return Number(value);
   }
+  function finePrice(fineUg, rate) {
+    if (!Number.isSafeInteger(fineUg) || fineUg < 0 ||
+        !Number.isSafeInteger(rate) || rate < 0 || rate > 1e12)
+      throw new Error("Revisa el peso, la ley y la tarifa del metal.");
+    const value = (BigInt(fineUg) * BigInt(rate) + 500000n) / 1000000n;
+    if (value > 1000000000000n)
+      throw new Error("La valoración supera el máximo permitido de un billón de COP.");
+    return Number(value);
+  }
   function metalValuation(balances, rates) {
     const rows=balances.map(row=>({...row,estimatedCop:null})),known=[];
     let numerator=0n,base=0n;
@@ -95,5 +104,5 @@
     const own=rows.filter(row=>row.owner==="taller").reduce((sum,row)=>sum+(row.estimatedCop??0n),0n);
     return {rows,total,own,clients:total-own,missing:[...new Set(rows.filter(row=>row.estimatedCop===null).map(row=>row.metal))]};
   }
-  return { format, parse, editing, tax, weightPrice, metalValuation };
+  return { format, parse, editing, tax, weightPrice, finePrice, metalValuation };
 });

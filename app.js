@@ -59,6 +59,13 @@ function auditDetails(value) {
     2,
   );
 }
+function readAuditDetails(raw) {
+  try {
+    return JSON.parse(raw) ?? {};
+  } catch {
+    return { detalleOriginal: raw };
+  }
+}
 const cop = (v) => "$ " + number(Math.round(v || 0));
 const weight = (mg) => number(Number(mg || 0) / 1000, 3) + " g";
 const fine = (ug) => number(Number(ug || 0) / 1e6, 3, 6) + " g fino";
@@ -2177,10 +2184,7 @@ function reportsPage() {
       AUDIT.filter((x) => inRange(x.at))
         .slice(0, 300)
         .map((x) => {
-          let d = {};
-          try {
-            d = JSON.parse(x.details);
-          } catch {}
+          const d = readAuditDetails(x.details);
           return tr([
             dt(x.at),
             E(x.actor),
@@ -2607,7 +2611,8 @@ function returnOrder(id) {
 }
 function payOrder(id) {
   const o = id ? find("orders", id) : null;
-  if (!currentShift())
+  const shift = currentShift();
+  if (!shift)
     return (
       modal(
         "Primero abre un turno",
@@ -2629,7 +2634,9 @@ function payOrder(id) {
         "Las órdenes que tengan saldo aparecerán aquí.",
       ),
     );
-  const target = o || list[0];
+  const target = id ? list.find(order => order.id === id) : list[0];
+  if (!target)
+    return modal("Cobros", notice("Orden sin saldo disponible", "Revisa la orden antes de registrar otro cobro."));
   modal(
     "Registrar pago" + (o ? " · " + o.code : ""),
     `<div class="form-grid"><div class="span-2">${select(
@@ -2638,7 +2645,7 @@ function payOrder(id) {
       list.map((o) => [o.id, o.code + " · " + client(o) + " · " + cop(due(o))]),
       target.id,
     )}</div>${moneyField("cash", "Efectivo recibido · COP", 0)}${moneyField("bank", "Transferencia recibida · COP", 0)}<div class="span-2">${field("bankRef", "Referencia bancaria (si aplica)", "text", "", 'maxlength="150"')}</div><div class="span-2 form-section"><h3>Metal recibido como pago</h3><p>Su valor pasa a ser abono; el metal pasa a ser propiedad del taller.</p></div>${metalSelect()}${puritySelect()}${weightField("goldWeight", "Peso del metal como pago (g)", 0, true)}${moneyField("rate", "Tarifa aplicada · COP / g fino", S.settings.rate.oro)}<div class="span-2" id="payment-preview"></div>${can("adjust") ? `<div class="span-2">${field("reason", "Motivo si cambia la tarifa oficial", "text", "", 'maxlength="1000"')}</div>` : ""}</div>`,
-    (b, f, key) => mutate("payment.create", b, key),
+    (b, f, key) => mutate("payment.create", { ...b, shiftId: shift.id }, key),
     "Registrar cobro",
   );
   updatePaymentPreview();
@@ -2649,11 +2656,17 @@ function updatePaymentPreview() {
   const b = inputData(f),
     o = find("orders", b.orderId);
   if (!o) return;
-  const goldMg = Math.round(Number(b.goldWeight || 0) * 1000),
-    fineUg = goldMg * Number(b.purity),
-    gold = Math.round((fineUg * Number(b.rate || 0)) / 1e6),
-    received = Number(b.cash || 0) + Number(b.bank || 0) + gold,
-    owed = due(o);
+  const goldMg = Math.round(Number(b.goldWeight || 0) * 1000);
+  const fineUg = goldMg * Number(b.purity);
+  let gold;
+  try {
+    gold = N.finePrice(fineUg, Number(b.rate || 0));
+  } catch (error) {
+    $("#payment-preview").textContent = error.message;
+    return;
+  }
+  const received = Number(b.cash || 0) + Number(b.bank || 0) + gold;
+  const owed = due(o);
   $("#payment-preview").innerHTML =
     `<div class="calculator">${weight(goldMg)} ${E(b.metal)} × ${number(Number(b.purity) / 1000, 3)} = ${fine(fineUg)}<br>Valor del metal: ${cop(gold)}${row("Saldo actual", cop(owed))}${row("Total recibido", cop(received))}${row("Abono aplicado", cop(Math.min(owed, received)))}${row("Vueltas en efectivo", cop(Math.max(0, received - owed)))}${row("Saldo restante", cop(Math.max(0, owed - received)), "debt")}</div>`;
 }
@@ -2860,9 +2873,9 @@ function newMetalPurchase() {
   );
 }
 function adjustMetal() {
-  simpleModal(
+  const revision = S.revision;
+  modal(
     "Conteo físico / existencia inicial",
-    "inventory.adjust",
     notice(
       "El ajuste conserva su motivo en auditoría",
       "Ingresa el total físico de esa cuenta, metal y ley. El conteo deja ese saldo final. Para una existencia inicial, escribe «Saldo inicial» con el soporte.",
@@ -2878,7 +2891,15 @@ function adjustMetal() {
         ],
         "own",
       )}${metalSelect()}${puritySelect()}${weightField("weight", "Existencia física contada (g)", "", true)}<div id="adjust-preview" class="calculator span-2"></div><div class="span-2">${text("reason", "Justificación y soporte obligatorio")}</div></div>`,
-    {},
+    async (data, form, key) => {
+      try {
+        return await mutate("inventory.adjust", data, key, revision);
+      } catch (error) {
+        if (error.status === 409)
+          throw new Error("Los datos cambiaron durante el conteo. Vuelve a abrir el formulario y verifica el saldo.");
+        throw error;
+      }
+    },
     "Asentar conciliación",
   );
   updateAdjustPreview();
@@ -3817,7 +3838,7 @@ async function handleAction(action, id, el) {
             "Referencia bancaria si aplica",
             "text",
             "",
-            'maxlength="150"',
+            'maxlength="200"',
           ) +
           '</div><div class="span-2">' +
           field(
@@ -3828,7 +3849,7 @@ async function handleAction(action, id, el) {
             'required maxlength="1000"',
           ) +
           "</div></div>",
-        { orderId: id },
+        { orderId: id, shiftId: currentShift()?.id ?? null },
         "Registrar devolución",
       );
       break;
@@ -3968,7 +3989,7 @@ async function handleAction(action, id, el) {
           ],
           "bank",
         )}<div class="span-2">${field("reference", "Comprobante / referencia de pago", "text", "", 'required maxlength="200"')}</div></div>`,
-        { id },
+        { id, shiftId: currentShift()?.id ?? null },
         "Registrar pago",
       );
       break;
@@ -3998,7 +4019,7 @@ async function handleAction(action, id, el) {
             ],
             "bank",
           )}${field("reference", "Comprobante / soporte", "text", "", 'required maxlength="200"')}</div>`,
-        { smithId: id },
+        { smithId: id, shiftId: currentShift()?.id ?? null, orderIds: orders.map(order => order.id) },
         "Registrar pago de honorarios",
       );
       break;
@@ -4049,7 +4070,7 @@ async function handleAction(action, id, el) {
         actionLabel(x.action),
         row("Fecha", dt(x.at)) +
           row("Responsable", E(x.actor)) +
-          `<pre style="white-space:pre-wrap;font-size:11px;line-height:1.8;word-break:break-word">${E(auditDetails(JSON.parse(x.details)))}</pre>`,
+          `<pre style="white-space:pre-wrap;font-size:11px;line-height:1.8;word-break:break-word">${E(auditDetails(readAuditDetails(x.details)))}</pre>`,
       );
       break;
     }
