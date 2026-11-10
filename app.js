@@ -1842,6 +1842,27 @@ function exportExpenses() {
   if (filters.expenseFrom && filters.expenseTo && filters.expenseFrom > filters.expenseTo) throw new Error("La fecha inicial no puede superar la fecha final.");
   return excel("gastos-taller",["Comprobante","Fecha gasto","Fecha registro","Categoría","Concepto","Pagado a","Medio","Valor COP","Soporte","Responsable","Turno de caja","Estado"],filteredExpenses().map(x=>[x.code,window.TallerExcel.date(x.expenseDate),window.TallerExcel.date(x.at),x.category,x.concept,x.beneficiary,x.method==="cash"?"Efectivo":"Banco",x.amount,x.reference,x.actor,find("shifts",x.shiftId)?.code||"",x.reversedAt?"Reversado":x.legacy?"Sin clasificar":"Registrado"]));
 }
+function cashMovementTable(shift, showActions = false) {
+  const entries = S.cashEntries.filter(x => x.shiftId === shift.id && !x.deletedAt);
+  return table(
+    ["Fecha y hora", "Concepto", "Importe", showActions ? "Estado / acción" : "Estado"],
+    entries.reverse().map(entry => {
+      const income = entry.ref === "CAJA" && entry.amount > 0;
+      let status = reversalBadge(entry);
+      if (showActions && !entry.reversedAt) {
+        if (entry.expenseId) status = reversalButton("expense", entry.expenseId);
+        else if (entry.ref === "CAJA") status = reversalButton("cash", entry.id);
+      }
+      return tr([
+        dt(entry.at),
+        E(measurementNote(entry.note)) + (income ? "<small>Ingreso adicional</small>" : ""),
+        `<span style="color:${entry.amount < 0 ? "var(--red)" : "var(--green)"}">${entry.amount < 0 ? "−" : "+"}${cop(Math.abs(entry.amount))}</span>`,
+        status,
+      ]);
+    }).join(""),
+    "Este turno no tiene movimientos de efectivo para mostrar.",
+  );
+}
 function cashPage() {
   const shift = currentShift(),
     gold = cashMetals();
@@ -1858,21 +1879,7 @@ function cashPage() {
       ? `<div class="kpis">${kpi("Efectivo esperado", cop(expectedCash(shift)), shift.code + " · " + shift.actor, "cash", true)}${kpi("Base inicial de efectivo", cop(shift.opening), "Apertura: " + openingModeLabel(shift), "cash")}${kpi("Movimientos del turno", S.cashEntries.filter((x) => x.shiftId === shift.id && !x.deletedAt).length, "Cobros, gastos y pagos", "file")}${kpi("Lotes de metal en caja", gold.length, "Base inicial y recaudo · por ley", "gold")}</div><div class="actions section-gap">${badge("Apertura en " + openingModeLabel(shift), "blue")}${allowed("cash", "Registrar gasto", "new-expense", "plus") + allowed("cash", "Ingreso adicional", "cash-entry", "plus")}${button("Imprimir resumen", "print-shift", "print", "", shift.id)}</div><div class="grid two section-gap">${card("Metal en caja", "Base de apertura y metal recibido como pago.", gold.length ? gold.map((x) => row(x.metal + " · ley " + number(x.purity), weight(x.mg)) + `<p class="balance-details muted">Base en caja: ${weight(x.openingMg)} · Recaudo: ${weight(x.receivedMg)}<br>${fine(x.fineUg)}</p>`).join("") : empty("No hay metal en caja", "La base de oro y los cobros en metal aparecerán aquí."))}${card(
           "Movimientos de efectivo",
           shift.code,
-          table(
-            ["Hora", "Concepto", "Importe", "Estado / acción"],
-            S.cashEntries
-              .filter((x) => x.shiftId === shift.id && !x.deletedAt)
-              .reverse()
-              .map((x) =>
-                tr([
-                  dt(x.at),
-                  E(measurementNote(x.note)) + (x.ref === "CAJA" && x.amount > 0 ? "<small>Ingreso adicional</small>" : ""),
-                  `<span style="color:${x.amount < 0 ? "var(--red)" : "var(--green)"}">${x.amount < 0 ? "−" : "+"}${cop(Math.abs(x.amount))}</span>`,
-                  x.reversedAt ? reversalBadge(x) : x.expenseId ? reversalButton("expense",x.expenseId) : x.ref === "CAJA" ? reversalButton("cash",x.id) : "",
-                ]),
-              )
-              .join(""),
-          ),
+          cashMovementTable(shift, true),
         )}</div>`
       : notice(
           "No hay turno abierto",
@@ -1908,7 +1915,7 @@ function cashPage() {
                   x.review ? "amber" : "",
                 )
               : badge("Abierto", "blue"),
-            button("Acta", "print-shift", "print", "small", x.id),
+            `<div class="actions">${button("Ver movimientos", "shift-movements", "file", "small", x.id)}${button("Acta", "print-shift", "print", "small", x.id)}</div>`,
           ]),
         )
         .join(""),
@@ -4052,6 +4059,16 @@ async function handleAction(action, id, el) {
     case "print-payment":
       printPayment(id);
       break;
+    case "shift-movements": {
+      const shift = find("shifts", id);
+      modal(
+        "Movimientos de efectivo · " + shift.code,
+        row("Base inicial de efectivo", cop(shift.opening)) +
+          row("Efectivo esperado", cop(shift.closedAt ? shift.expected : expectedCash(shift))) +
+          cashMovementTable(shift),
+      );
+      break;
+    }
     case "print-shift":
       printShift(id);
       break;

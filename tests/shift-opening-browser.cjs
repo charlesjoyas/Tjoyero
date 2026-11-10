@@ -168,9 +168,9 @@ const assert = require("node:assert/strict");
       fullPage: true,
     });
     await click("cash-entry");
-    await page.locator("#modal-form [name=amount]").fill("25.000");
+    await page.locator("#modal-form [name=amount]").fill("1.500.000");
     await page.locator("#modal-form [name=note]").fill("Ingreso de prueba");
-    assert.match(await page.locator("#cash-income-preview").innerText(), /125\.000,00/);
+    assert.match(await page.locator("#cash-income-preview").innerText(), /1\.600\.000,00/);
     await submit();
     await page.reload();
     const income = page.locator("tr").filter({ hasText: "Ingreso de prueba" });
@@ -178,13 +178,24 @@ const assert = require("node:assert/strict");
     assert.equal(await income.count(), 1);
     assert.match(await income.innerText(), /Ingreso adicional/);
     await click("close-shift");
-    assert.match(await page.locator("[name=expected]").inputValue(), /125\.000,00/);
-    await page.locator("[name=counted]").fill("125000");
+    assert.match(await page.locator("[name=expected]").inputValue(), /1\.600\.000,00/);
+    await page.locator("[name=counted]").fill("1600000");
     await page.locator('[name="gold-0"]').fill("2");
     await page.locator('[name="gold-1"]').fill("3");
     await page.locator("[name=receiver]").fill("Bodeguero");
     await submit();
     assert.equal(await page.locator("section.table-card tbody tr").count(), 3);
+    await page.reload();
+    const history = page.locator("section.table-card [data-action=shift-movements]");
+    await history.first().click();
+    const historicalIncome = page.locator("#dialog tr").filter({ hasText: "Ingreso de prueba" });
+    assert.equal(await historicalIncome.count(), 1);
+    assert.match(await historicalIncome.innerText(), /1\.500\.000,00/);
+    assert.match(await page.locator("#dialog").innerText(), /1\.600\.000,00/);
+    await click("close-modal");
+    await history.nth(1).click();
+    assert.equal(await historicalIncome.count(), 0);
+    await click("close-modal");
     await page
       .locator("section.table-card [data-action=print-shift]")
       .first()
@@ -240,7 +251,7 @@ const assert = require("node:assert/strict");
       .state;
     assert.equal(s.shifts.length, 3);
     assert(s.shifts.every((x) => x.closedAt));
-    assert.equal(s.shifts.at(-1).expected, 125000);
+    assert.equal(s.shifts.at(-1).expected, 1600000);
     assert.equal(s.shifts.at(-1).difference, 0);
     assert.equal(s.payments.length, 1);
     assert.deepEqual(errors, []);
