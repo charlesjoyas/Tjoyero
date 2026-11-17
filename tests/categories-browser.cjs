@@ -43,6 +43,9 @@ const assert=require("node:assert/strict");
     await page.locator('[data-gold-category="purity"]').selectOption(category.id);
     await page.locator('#receive-form [name="metal"]').selectOption("plata");
     assert.equal(await page.locator('[data-gold-category="purity"]').inputValue(),"");
+    assert.equal(await page.locator('#receive-form [name="purity"]').inputValue(),"");
+    await page.locator('[data-gold-category="purity"]').selectOption("silver-925");
+    assert.equal(await page.locator('#receive-form [name="purity"]').inputValue(),"925,00");
     // Navigate without the unsaved-form prompt affecting this test.
     await page.reload();
     await page.locator('[data-action="open-shift"]').first().click();

@@ -2874,17 +2874,35 @@ function closeShift() {
   );
 }
 let purchaseRowIndex=0;
-function purchaseCategoryRow(index) {
-  const options = metalCategories().filter(x => x.active)
+function purchaseCategoryRow(index, categories) {
+  const options = categories
     .map(x => [x.id, metalLabel(x.metal) + " · " + x.name + " · ley " + number(x.purity)]);
   return `<section class="card section-gap" data-purchase-row="${index}"><div class="card-head"><h3>Metal a comprar</h3>${button("Quitar","remove-purchase-row","","small",String(index))}</div><div class="form-grid">${select("purchaseCategory-"+index,"Categoría del metal",[["","Elegir categoría"],...options],"")}${weightField("purchaseWeight-"+index,"Peso recibido (g)","")}${moneyField("purchasePrice-"+index,"Precio por gramo de esta categoría · COP","")}<div class="field"><span>Valor de esta categoría</span><strong data-purchase-subtotal>${cop(0)}</strong></div></div><p class="muted">El total se calcula con el peso recibido de esta categoría. El fino se registra aparte.</p></section>`;
+}
+function selectedPurchaseCategory(form, index) {
+  const selected = form.elements["purchaseCategory-" + index].selectedOptions[0];
+  if (!selected?.value) return null;
+  return { id: selected.value, metal: selected.dataset.metal, purity: Number(selected.dataset.purity) };
+}
+function insertPurchaseCategoryRow(index) {
+  const list = $("#purchase-category-rows");
+  const categories = metalCategories().filter(category => category.active);
+  list.insertAdjacentHTML("beforeend", purchaseCategoryRow(index, categories));
+  const form = list.closest("form");
+  for (const option of form.elements["purchaseCategory-" + index].options) {
+    const category = categories.find(item => item.id === option.value);
+    if (!category) continue;
+    option.dataset.metal = category.metal;
+    option.dataset.purity = String(category.purity);
+  }
 }
 function updatePurchaseOrderPreview() {
   const form=$("#modal-form"),target=$("#purchase-order-preview",form);if(!target)return;
   let total=0,mg=0;const weights=new Map();
   try{
     $$("[data-purchase-row]",form).forEach(row=>{
-      const index=row.dataset.purchaseRow,category=metalCategories().find(x=>x.id===form.elements["purchaseCategory-"+index].value);
+      const index = row.dataset.purchaseRow;
+      const category = selectedPurchaseCategory(form, index);
       const rawWeight=numericValue(form.elements["purchaseWeight-"+index]),weight=Math.round(rawWeight*1000),price=numericValue(form.elements["purchasePrice-"+index]);
       const value=N.weightPrice(weight,price);total+=value;mg+=weight;
       if(total>1e12||mg>1e9)throw new Error("El total o el peso de la compra supera el máximo permitido.");
@@ -2906,18 +2924,20 @@ function newPurchase() {
   purchaseRowIndex=1;
   modal("Nueva orden de compra",
     notice("Compra recibida: ingresa al inventario al confirmar","Los gramos de cada categoría se registran en bodega propia con su ley. La compra crea una cuenta por pagar; el pago al proveedor se registra por separado.","blue")+
-    `<div class="form-grid"><div class="span-2">${select("supplierId","Proveedor",S.suppliers.map(x=>[x.id,x.name]),S.suppliers[0].id)}</div>${field("document","Documento / soporte de compra","text","",'required maxlength="100"')}${field("dueDate","Fecha de vencimiento","date",today(),"required")}</div><div id="purchase-category-rows">${purchaseCategoryRow(0)}</div><div class="actions section-gap">${button("Añadir categoría","add-purchase-row","plus","small")}</div><div id="purchase-order-preview" class="calculator section-gap"></div>`,
+    `<div class="form-grid"><div class="span-2">${select("supplierId","Proveedor",S.suppliers.map(x=>[x.id,x.name]),S.suppliers[0].id)}</div>${field("document","Documento / soporte de compra","text","",'required maxlength="100"')}${field("dueDate","Fecha de vencimiento","date",today(),"required")}</div><div id="purchase-category-rows"></div><div class="actions section-gap">${button("Añadir categoría","add-purchase-row","plus","small")}</div><div id="purchase-order-preview" class="calculator section-gap"></div>`,
     (b,form,key)=>mutate("purchase.create",{supplierId:b.supplierId,document:b.document,dueDate:b.dueDate,
       items: $$("[data-purchase-row]", form).map(row => {
         const index = row.dataset.purchaseRow;
-        const categoryId = b["purchaseCategory-" + index];
-        return { categoryId, purity: categories.find(x => x.id === categoryId)?.purity,
+        const category = selectedPurchaseCategory(form, index);
+        return { categoryId: category?.id, metal: category?.metal, purity: category?.purity,
           weight: b["purchaseWeight-" + index], unitPrice: b["purchasePrice-" + index] };
       })},key),"Confirmar compra e ingresar a inventario");
   const form=$("#modal-form");
+  insertPurchaseCategoryRow(0);
   form.addEventListener("change",event=>{
     if(event.target.name?.startsWith("purchaseCategory-")){
-      const i=event.target.name.slice("purchaseCategory-".length),category=categories.find(x=>x.id===event.target.value);
+      const i = event.target.name.slice("purchaseCategory-".length);
+      const category = selectedPurchaseCategory(form, i);
       if(category)setNumericValue(form.elements["purchasePrice-"+i],Math.round((S.settings.rate[category.metal] ?? 0)*category.purity/1000));
     }
     updatePurchaseOrderPreview();
@@ -3786,7 +3806,7 @@ async function handleAction(action, id, el) {
       break;
     case "add-purchase-row":
       if($$("[data-purchase-row]").length>=50)throw new Error("Puedes añadir hasta 50 categorías por compra.");
-      $("#purchase-category-rows").insertAdjacentHTML("beforeend",purchaseCategoryRow(purchaseRowIndex++));
+      insertPurchaseCategoryRow(purchaseRowIndex++);
       updatePurchaseOrderPreview();
       break;
     case "remove-purchase-row":
@@ -4401,7 +4421,14 @@ document.addEventListener("input", (e) => {
 });
 document.addEventListener("change", (e) => {
   const el = e.target;
-  if (el.name === "metal") syncMetalFields(el.form);
+  if (el.name === "metal" && el.form) {
+    for (const category of $$("[data-gold-category]", el.form)) {
+      if (!category.value) continue;
+      setNumericValue(el.form.elements.namedItem(category.dataset.goldCategory), "");
+      category.value = "";
+    }
+    syncMetalFields(el.form);
+  }
   if (el.matches("[data-gold-category]")) {
     const form = el.closest("form");
     const category = metalCategories().find(x => x.id === el.value && x.active &&

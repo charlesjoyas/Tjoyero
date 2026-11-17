@@ -1396,8 +1396,9 @@ function execute(s, action, b, a) {
           assert(input&&typeof input==="object","Detalle de compra inválido.");
           const category=categories.find(x=>x.id===input.categoryId);
           assert(category&&category.active,"La categoría de metal no existe o está inactiva. Actualiza la orden.");
-          assert(input.purity === undefined || input.purity === category.purity,
-            "La ley de la categoría cambió. Vuelve a abrir la orden y revisa el precio.", 409);
+          assert((input.purity === undefined || input.purity === category.purity) &&
+            (input.metal === undefined || input.metal === category.metal),
+            "La categoría cambió. Añade una línea con la categoría actualizada, revisa el peso y el precio, y quita la línea anterior.", 409);
           const weight=grams(input.weight),price=money(input.unitPrice,"Precio por gramo de la categoría");
           assert(price>0,"El precio por gramo debe ser mayor a cero.");
           let total;try{total=Numbers.weightPrice(weight,price);}catch(error){fail(error.message);}
@@ -2122,6 +2123,16 @@ function validateState(s, { backup = false } = {}) {
   }
   for (const x of s.materialMoves)
     assert(materials.has(x.materialId), "Movimiento de insumo inexistente.");
+  const purchaseReceipts = new Map();
+  if (backup) {
+    for (const entry of s.ledger) {
+      if (entry.from !== "proveedor" || entry.to !== "own" || entry.owner !== "taller") continue;
+      const received = purchaseReceipts.get(entry.ref) ?? new Map();
+      const key = PM.key(entry);
+      received.set(key, (received.get(key) ?? 0) + entry.mg);
+      purchaseReceipts.set(entry.ref, received);
+    }
+  }
   for (const p of s.purchases) {
     assert(suppliers.has(p.supplierId), "Compra sin proveedor.");
     money(p.total, "Total de compra");
@@ -2136,6 +2147,17 @@ function validateState(s, { backup = false } = {}) {
         assert(calculated===item.total&&item.total>0,"El importe por categoría no corresponde al peso y precio.");
       }
       assert(Number.isSafeInteger(p.mg)&&p.mg<=1000000000&&p.items.reduce((sum,item)=>sum+item.mg,0)===p.mg&&p.items.reduce((sum,item)=>sum+item.total,0)===p.total&&p.metal===p.items[0].metal&&p.purity===p.items[0].purity&&p.rate===p.items[0].unitPrice,"Los detalles no concilian con el total de compra.");
+      if (backup) {
+        const expected = new Map();
+        for (const item of p.items) {
+          const key = PM.key(item);
+          expected.set(key, (expected.get(key) ?? 0) + item.mg);
+        }
+        const received = purchaseReceipts.get(p.code);
+        assert(received && received.size === expected.size &&
+          [...expected].every(([key, mg]) => received.get(key) === mg),
+          "La compra " + p.code + " no coincide con el metal, la ley o el peso ingresado al inventario.");
+      }
     }
     assert(
       s.supplierPayments

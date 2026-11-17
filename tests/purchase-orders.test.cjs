@@ -39,6 +39,11 @@ test("Orden de compra: plata editable en copias anteriores y saldos separados en
   assert.equal(D.balance(s, "own", "plata", 900), 2000);
   assert.equal(D.balance(s, "own", "oro", 900), 0);
   assert.equal(D.balance(s, "own", "oro", 750), 1000);
+  D.validateState(s, { backup: true });
+  const altered = structuredClone(s);
+  altered.purchases[0].metal = "oro";
+  altered.purchases[0].items[0].metal = "oro";
+  assert.throws(() => D.validateState(altered, { backup: true }), /metal, la ley o el peso/);
   act("category.save", { id: silver.id, name: "Plata", purity: 925 });
   assert.equal(s.purchases[0].items[0].purity, 900);
   assert.throws(() => act("purchase.create", {
@@ -49,6 +54,7 @@ test("Orden de compra: plata editable en copias anteriores y saldos separados en
   act("operation.reverse", { type: "purchase", id: purchase.id, reason: "Material devuelto", confirmed: true });
   assert.equal(D.balance(s, "own", "plata", 900), 0);
   assert.equal(D.balance(s, "own", "oro", 750), 0);
+  D.validateState(s, { backup: true });
 });
 test("Orden de compra: rechaza categorías inválidas, importes, permisos y detalles corruptos",()=>{
   const f=fixture(),{s,act,supplier,items}=f,before=structuredClone(s),body={supplierId:supplier.id,document:"FACT-003",dueDate:"2026-12-01",items};
