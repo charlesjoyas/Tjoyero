@@ -98,6 +98,26 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
     await page.setViewportSize({width:320,height:950});assert.equal(await page.locator('#dialog').evaluate(el=>el.scrollWidth>el.clientWidth),false,"Reversión completa móvil");
     await submit.click();await page.locator('#dialog').waitFor({state:"hidden"});saved=await state();assert.equal(saved.orders.find(x=>x.id===inProgress.id).status,"cancelled");assert.equal(saved.payments.at(-1).bank,-10000);assert.equal(saved.payments.at(-1).bankRef,"R".repeat(200));
     await page.setViewportSize({width:1440,height:1000});
+    await act("client.save", {
+      id: c.id, name: c.name,
+      custody: { weight: 7.25, purity: 750, note: "Ingreso de custodia por error" },
+    });
+    const withCustody = await state();
+    const receipt = withCustody.ledger.at(-1);
+    await page.goto(base+"/#gold");
+    await page.reload();
+    await page.locator(`[data-action="reverse-operation"][data-id="ledger|${receipt.id}"]`).click();
+    await modal.locator('[name="reason"]').fill("Se verificó el ingreso erróneo");
+    await modal.locator('[name="confirmed"]').check();
+    await submit.click();
+    await modal.locator('#reversal-preview').getByText(/Ingreso de custodia directa compensado/).waitFor();
+    assert.deepEqual(await state(), withCustody);
+    await submit.click();
+    await page.locator('#dialog').waitFor({state:"hidden"});
+    const afterCustody = await state();
+    assert.ok(afterCustody.ledger.find(entry => entry.id === receipt.id).reversedAt);
+    assert.equal(afterCustody.ledger.at(-1).from, "custody");
+    assert.equal(afterCustody.ledger.at(-1).mg, 7250);
     await act("user.create",{name:"Consulta",username:"consulta",password:"1234",role:"consulta"});
     const restricted=await browser.newContext();await restricted.request.post(base+"/api/login",{data:{username:"consulta",password:"1234"}});
     const restrictedPage=await restricted.newPage();await restrictedPage.goto(base+"/#reversals");await restrictedPage.locator('#page').waitFor();

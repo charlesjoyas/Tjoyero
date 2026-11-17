@@ -1486,6 +1486,9 @@ function metalOwnerLabel(owner) {
   if (owner.startsWith("cliente:")) return find("clients", owner.slice("cliente:".length))?.name || "Cliente";
   return find("orders", owner)?.code || "Cliente";
 }
+function canReverseLedgerEntry(entry) {
+  return ["TRASLADO", "CONCILIACIÓN", "CUSTODIA"].includes(entry.ref);
+}
 function clientsPage() {
   const q = (filters.clientQ || "").toLowerCase(),
     list = S.clients.filter((c) =>
@@ -1645,7 +1648,7 @@ function goldPage() {
             x.owner === "taller"
               ? "Taller"
               : badge(metalOwnerLabel(x.owner), "blue"),
-            button("Detalle", "movement-detail", "", "small", x.id) + (x.reversedAt ? reversalBadge(x) : ["TRASLADO","CONCILIACIÓN"].includes(x.ref) ? reversalButton("ledger",x.id) : ""),
+            button("Detalle", "movement-detail", "", "small", x.id) + (x.reversedAt ? reversalBadge(x) : canReverseLedgerEntry(x) ? reversalButton("ledger",x.id) : ""),
           ]),
         )
         .join(""),
@@ -2251,7 +2254,7 @@ const reversalTypes = [
   ["purchase","Compra de metal"],["supplierPayment","Pago a proveedor"],
   ["sale","Entrega / venta al cliente"],["payment","Cobro o devolución al cliente"],
   ["order","Orden de trabajo completa"],["cash","Ingreso / gasto manual de caja"],
-  ["ledger","Traslado / ajuste de metal"],["material","Entrada / consumo de insumos"],
+  ["ledger","Traslado, ajuste o custodia directa"],["material","Entrada / consumo de insumos"],
   ["stockTransfer","Transferencia de piezas"],["stockReceive","Ingreso de piezas terminadas"],
   ["settlement","Pago al orfebre"],
   ["assignment","Asignación a mesa sin actividad posterior"],["quality","Aprobación de calidad"],
@@ -2268,7 +2271,7 @@ function reversalCandidates(type) {
   if(type==="payment")rows=S.payments.filter(x=>!x.voidedAt&&!x.reversedAt).map(x=>[x.id,x.code+" · "+cop(x.applied)+" · "+(find("orders",x.orderId)?.code||"")]);
   if(type==="order")rows=S.orders.filter(x=>x.status!=="cancelled").map(x=>[x.id,x.code+" · "+statusNames[x.status]+" · "+x.description]);
   if(type==="cash")rows=S.cashEntries.filter(x=>x.ref==="CAJA"&&!x.expenseId&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.note+" · "+cop(x.amount)]);
-  if(type==="ledger")rows=S.ledger.filter(x=>["TRASLADO","CONCILIACIÓN"].includes(x.ref)&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.ref+" · "+x.metal+" · "+weight(x.mg)]);
+  if(type==="ledger")rows=S.ledger.filter(x=>canReverseLedgerEntry(x)&&!x.reversedAt).map(x=>[x.id,dt(x.at)+" · "+x.ref+" · "+x.metal+" · "+weight(x.mg)+(x.ref==="CUSTODIA"?" · "+metalOwnerLabel(x.owner):"")]);
   if(type==="material")rows=S.materialMoves.filter(x=>!x.reversedAt&&!x.reversalId).map(x=>[x.id,dt(x.at)+" · "+(find("materials",x.materialId)?.name||"")+" · "+quantity(x.quantity)+" · "+x.note]);
   if(type==="stockTransfer")rows=S.stock.flatMap(x=>x.transfers.filter(t=>!t.reversedAt).map(t=>[t.id,t.code+" · "+x.sku+" · "+t.destination]));
   if(type==="stockReceive")rows=S.stock.filter(x=>!x.reversedAt).map(x=>[x.id,x.sku+" · "+x.description]);
@@ -2297,6 +2300,8 @@ function reversalReference(r) {
   const collections={gemLot:"gemstoneLots",expense:"expenses",purchase:"purchases",supplierPayment:"supplierPayments",sale:"orders",payment:"payments",order:"orders",assignment:"orders",quality:"orders",cash:"cashEntries",ledger:"ledger",material:"materialMoves",stockReceive:"stock",settlement:"settlements"};
   if(r.type==="stockTransfer")return S.stock.flatMap(x=>x.transfers).find(x=>x.id===r.targetId)?.code||r.targetId;
   const source=S[collections[r.type]]?.find(x=>x.id===r.targetId);
+  if (r.type === "ledger" && source?.ref === "CUSTODIA")
+    return "Custodia directa · " + metalOwnerLabel(source.owner);
   return r.original?.invoice||source?.code||source?.sku||source?.reference||source?.note||r.targetId;
 }
 function reverseOperationModal(type="purchase",targetId="",mode="reverse") {
@@ -2495,6 +2500,8 @@ function clientModal(id) {
     id ? "Editar cliente" : "Nuevo cliente",
     `<div class="form-grid"><div class="span-2">${field("name", "Nombre completo", "text", c.name, 'required maxlength="120"')}</div>${field("document", "Documento", "text", c.document, 'maxlength="50"')}${field("phone", "Teléfono con indicativo de país", "tel", c.phone, 'maxlength="40" placeholder="573101234567"')}<div class="span-2">${field("email", "Correo electrónico", "email", c.email, 'maxlength="120"')}</div><div class="span-2">${text("notes", "Notas del cliente", c.notes)}</div>${custodyFields}</div>`,
     ({ custodyWeight, custodyPurity, custodyNote, ...data }, form, key) => {
+      if (!custodyWeight && custodyNote?.trim())
+        throw new Error("Ingresa el peso del oro para registrar la entrega en custodia.");
       if (custodyWeight) data.custody = { weight: custodyWeight, purity: custodyPurity, note: custodyNote };
       return mutate("client.save", { ...data, id: id || undefined }, key);
     },
@@ -2987,14 +2994,18 @@ function clientDetail(id) {
     orders = S.orders.filter((o) => o.clientId === id);
   const owner = clientCustodyOwner(id);
   const custody = getBalances().filter(entry => entry.account === "custody" && entry.owner === owner);
-  const history = S.ledger.filter(entry => entry.owner === owner).reverse();
+  const history = S.ledger.filter(entry => entry.owner === owner && !entry.deletedAt).reverse();
   modal(
     c.name,
     `<p class="muted">${E(c.document)} · ${E(c.phone)} · ${E(c.email)}</p><p style="font-size:12px;line-height:1.8">${E(c.notes)}</p>
       ${card("Custodia directa de oro", "Oro entregado a nombre del cliente.", custody.map(entry =>
         row("Oro · ley " + number(entry.purity), weight(entry.mg)),
-      ).join("") + table(["Fecha", "Ley", "Peso recibido", "Concepto", "Responsable"],
-        history.map(entry => tr([dt(entry.at), entry.purity, weight(entry.mg), E(entry.note), E(entry.actor)])).join(""),
+      ).join("") + table(["Fecha", "Ley", "Peso", "Concepto", "Responsable", "Estado"],
+        history.map(entry => tr([
+          dt(entry.at), entry.purity, (entry.to === "custody" ? "+" : "−") + weight(entry.mg),
+          E(entry.note), E(entry.actor),
+          entry.reversedAt ? reversalBadge(entry) : entry.from === "custody" ? "Compensación" : "Ingreso",
+        ])).join(""),
         "Aún no hay ingresos de custodia directa.",
       ))}<div class="section-gap">${orderTable(orders)}</div>`,
   );

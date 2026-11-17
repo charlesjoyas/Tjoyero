@@ -77,6 +77,33 @@ test("Caja y libro: compensaciones seguras, sin saldos negativos ni reversión d
   act("inventory.adjust",{account:"own",metal:"oro",purity:750,weight:12,reason:"Error de conteo"});
   reverse("ledger",s.ledger.at(-1).id);assert.equal(D.balance(s,"own","oro",750),10000);
 });
+test("Custodia directa: revierte una entrega sin tocar la bodega ni las órdenes", () => {
+  const {s, act, c, order, reverse, blocked} = fixture();
+  const work = order();
+  const owner = "cliente:" + c.id;
+  const deposit = () => act("client.save", {
+    id: c.id, name: c.name,
+    custody: { weight: 7.25, purity: 750, note: "Entrega directa" },
+  });
+  deposit();
+  const receipt = s.ledger.at(-1);
+  deposit();
+  assert.equal(D.balance(s, "custody", "oro", 750, owner), 14500);
+  const reversal = reverse("ledger", receipt.id);
+  assert.equal(D.balance(s, "custody", "oro", 750, owner), 7250);
+  assert.equal(D.balance(s, "custody", "oro", 750, work.id), 2000);
+  assert.equal(D.balance(s, "own", "oro", 750), 10000);
+  blocked("ledger", receipt.id, /ya fue/);
+  const invalid = structuredClone(s);
+  invalid.ledger.push({ ...invalid.ledger.at(-1), id: randomUUID() });
+  assert.throws(() => D.validateState(invalid, { backup: true }), /compensación/);
+  act("operation.delete", {
+    type: "ledger", id: receipt.id, reversalId: reversal.id,
+    reason: "Ingreso duplicado", confirmation: "ELIMINAR", confirmed: true,
+  });
+  assert.equal(D.balance(s, "custody", "oro", 750, owner), 7250);
+  D.validateState(s, { backup: true });
+});
 test("Insumos: revierte consumos previos al retorno y entradas en orden, restaurando costo y cantidades",()=>{
   const f=fixture(),{s,act,reverse,blocked}=f,o=f.order();
   const m=act("material.save",{name:"Piedra",unit:"pieza",quantity:10,unitCost:100,min:0});

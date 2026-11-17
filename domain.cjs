@@ -1926,6 +1926,7 @@ function validateState(s, { backup = false } = {}) {
         "Tipo de apertura inválido.",
       );
   }
+  const custodyCompensations = new Set();
   for (const x of s.ledger) {
     assert(
       Number.isSafeInteger(x.mg) &&
@@ -1943,11 +1944,25 @@ function validateState(s, { backup = false } = {}) {
     const isClientCustody = typeof x.owner === "string" && x.owner.startsWith("cliente:");
     if (isClientCustody) {
       assert(clients.has(x.owner.slice("cliente:".length)), "Custodia manual sin cliente válido.");
-      assert(x.from === "cliente" && x.to === "custody" && x.metal === "oro" && x.ref === "CUSTODIA",
-        "Movimiento de custodia manual inválido.");
+      const receipt = x.from === "cliente" && x.to === "custody" && x.ref === "CUSTODIA";
+      const compensation = x.from === "custody" && x.to === "cliente" && typeof x.ref === "string" && x.ref.startsWith("REV-");
+      assert(x.metal === "oro" && (receipt || compensation), "Movimiento de custodia manual inválido.");
+      if (compensation) {
+        const reversal = (s.reversals || []).find(entry => entry.id === x.ref.slice(4) && entry.type === "ledger");
+        const original = reversal && s.ledger.find(entry => entry.id === reversal.targetId);
+        assert(original && original.ref === "CUSTODIA" && original.reversalId === reversal.id && original.reversedAt &&
+          original.owner === x.owner && original.purity === x.purity && original.mg === x.mg &&
+          !custodyCompensations.has(original.id),
+          "La compensación no coincide con el ingreso de custodia.");
+        custodyCompensations.add(original.id);
+      }
     } else {
       assert(x.owner === "taller" || orders.has(x.owner), "Propietario de metal inexistente.");
     }
+  }
+  for (const entry of s.ledger) {
+    if (entry.ref === "CUSTODIA" && entry.owner.startsWith("cliente:") && entry.reversedAt)
+      assert(custodyCompensations.has(entry.id), "El ingreso de custodia reversado no tiene compensación.");
   }
   assert(
     balances(s).every((x) => Number.isSafeInteger(x.mg) && x.mg >= 0),

@@ -179,8 +179,15 @@ module.exports = function reverse(s, b, a, D) {
     }
     case "ledger": {
       const x=get(s,"ledger",b.id);live(x);
-      assert(["TRASLADO","CONCILIACIÓN"].includes(x.ref)&&x.owner==="taller","Este movimiento se revierte desde su compra, cobro o proceso original.");
-      inverse(x);mark(x);record.summary="Movimiento de metal compensado con una ruta inversa en el libro.";
+      const clientCustody = x.ref === "CUSTODIA" && x.owner.startsWith("cliente:") &&
+        x.from === "cliente" && x.to === "custody" && x.metal === "oro";
+      assert(clientCustody || (["TRASLADO","CONCILIACIÓN"].includes(x.ref) && x.owner === "taller"),
+        "Este movimiento se revierte desde su compra, cobro o proceso original.");
+      inverse(x);
+      mark(x);
+      record.summary = clientCustody
+        ? "Ingreso de custodia directa compensado. El oro se descuenta del saldo del cliente."
+        : "Movimiento de metal compensado con una ruta inversa en el libro.";
       break;
     }
     case "material": {
