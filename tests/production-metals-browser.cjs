@@ -48,9 +48,28 @@ const fs=require("node:fs"),os=require("node:os"),path=require("node:path"),asse
       clientId:client.id,type:"Fabricación",description:"Oro de bodega",condition:"Sin custodia",
       metal:"oro",purity:916,receivedWeight:0,dueDate:"2026-12-01",
     });
+    const mixedShift = await act("shift.open",{
+      mode:"mixed",opening:100000,openingGold:[{metal:"oro",purity:715,weight:7}],
+    });
     await page.goto(base+"/#orders/"+differentLaw.id);
     await page.reload();
     await page.locator('[data-action="assign-order"]').click();
+    assert.match(await form.innerText(), /Hay oro reservado en la caja CJ-0001/);
+    assert.match(await form.innerText(), /7,000 g de ley 715,00/);
+    await page.keyboard.press("Escape");
+    await page.locator(".topbar .cash-shortcut").click();
+    await form.locator('[name="counted"]').fill("100000");
+    await form.locator('[name="gold-0"]').fill("7,0");
+    await form.locator('[name="receiver"]').fill("Bodega");
+    await submit();
+    s = await state();
+    assert.ok(s.shifts.find(shift=>shift.id===mixedShift.id).closedAt);
+    assert.equal(D.balance(s,"own","oro",715),7000);
+    await page.locator(".topbar .cash-shortcut").click();
+    await form.locator('[name="opening"]').fill("100000");
+    await submit();
+    await page.locator('[data-action="assign-order"]').click();
+    assert.doesNotMatch(await form.innerText(), /Hay oro reservado en la caja/);
     const law = form.locator('[name="ownPurity"]');
     assert.equal(await law.inputValue(),"916");
     assert.match(await law.locator('option[value="916"]').innerText(),/0,000 g/);

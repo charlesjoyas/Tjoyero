@@ -2547,6 +2547,8 @@ function assignOrder(id) {
     );
   assignmentMetalIndex=0;
   const stock = getBalances().filter(row => row.owner === "taller" && row.metal === o.metal && row.mg > 0);
+  const goldInCash = stock.filter(row => row.account === "cashGold");
+  const shift = currentShift();
   modal(
     "Asignar a mesa · " + o.code,
     notice(
@@ -2554,6 +2556,14 @@ function assignOrder(id) {
       `Custodia del cliente disponible: ${weight(balance("custody", o.metal, o.purity, o.id))}. Para metal propio, elige el origen y la ley que pesaste.`,
       "blue",
     ) +
+      (shift && goldInCash.length
+        ? notice(
+          "Hay oro reservado en la caja " + shift.code,
+          goldInCash.map(row => weight(row.mg) + " de ley " + number(row.purity)).join(" · ") +
+            ". En Caja y turnos, confirma el arqueo para devolver ese oro a bodega. Si vuelves a abrir caja, elige Solo efectivo para dejarlo disponible.",
+          "amber",
+        )
+        : "") +
       notice("Al confirmar se registra la salida de inventario", "Los gramos de metal propio salen del origen elegido y pasan a la mesa de trabajo. El metal del cliente sale de su custodia, sin reducir tu bodega propia.", "blue") +
       `<div class="form-grid">${select(
         "smithId",
