@@ -1478,6 +1478,14 @@ function orderDetail(o) {
   );
 }
 
+function clientCustodyOwner(id) {
+  return "cliente:" + id;
+}
+function metalOwnerLabel(owner) {
+  if (owner === "taller") return "Taller";
+  if (owner.startsWith("cliente:")) return find("clients", owner.slice("cliente:".length))?.name || "Cliente";
+  return find("orders", owner)?.code || "Cliente";
+}
 function clientsPage() {
   const q = (filters.clientQ || "").toLowerCase(),
     list = S.clients.filter((c) =>
@@ -1507,7 +1515,7 @@ function clientsPage() {
             ids = orders.map((o) => o.id),
             custody = getBalances().filter(
               (x) =>
-                ids.includes(x.owner) &&
+                (x.owner === clientCustodyOwner(c.id) || ids.includes(x.owner)) &&
                 ["custody", "process", "scrap"].includes(x.account),
             );
           return tr([
@@ -1636,13 +1644,13 @@ function goldPage() {
             fine(x.fineUg),
             x.owner === "taller"
               ? "Taller"
-              : badge(find("orders", x.owner)?.code || "Cliente", "blue"),
+              : badge(metalOwnerLabel(x.owner), "blue"),
             button("Detalle", "movement-detail", "", "small", x.id) + (x.reversedAt ? reversalBadge(x) : ["TRASLADO","CONCILIACIÓN"].includes(x.ref) ? reversalButton("ledger",x.id) : ""),
           ]),
         )
         .join(""),
       "No hay movimientos que coincidan con los filtros.",
-    )}</section>${card("Existencias detalladas", "Conciliación por metal, ley y propietario.", table(["Cuenta", "Metal", "Ley", "Propietario", "Bruto", "Fino", "Valor estimado COP"], balances.map((x) => tr([E(ACC[x.account]), E(x.metal), x.purity, x.owner === "taller" ? "Taller" : E(find("orders", x.owner)?.code || "Cliente"), weight(x.mg), fine(x.fineUg), valuationLabel([x])])).join("")))}`
+    )}</section>${card("Existencias detalladas", "Conciliación por metal, ley y propietario.", table(["Cuenta", "Metal", "Ley", "Propietario", "Bruto", "Fino", "Valor estimado COP"], balances.map((x) => tr([E(ACC[x.account]), E(x.metal), x.purity, E(metalOwnerLabel(x.owner)), weight(x.mg), fine(x.fineUg), valuationLabel([x])])).join("")))}`
   );
 }
 function productionPage() {
@@ -2478,11 +2486,18 @@ function simpleModal(title, action, html, fixed = {}, submit = "Guardar") {
 }
 function clientModal(id) {
   const c = id ? find("clients", id) : {};
-  simpleModal(
+  const custodyFields = id && !c.internal
+    ? `<div class="span-2 form-section"><h3>Recibir oro en custodia</h3><p>El peso que registres se suma al saldo del cliente. Deja el campo vacío si solo vas a editar sus datos.</p></div>
+      ${puritySelect("custodyPurity")}${field("custodyWeight", "Peso recibido en custodia (g)", "number", "", 'min="0.001" max="1000000" step="0.001"', 1)}
+      <div class="span-2">${field("custodyNote", "Concepto o soporte de la entrega", "text", "", 'maxlength="1000"')}</div>`
+    : "";
+  modal(
     id ? "Editar cliente" : "Nuevo cliente",
-    "client.save",
-    `<div class="form-grid"><div class="span-2">${field("name", "Nombre completo", "text", c.name, 'required maxlength="120"')}</div>${field("document", "Documento", "text", c.document, 'maxlength="50"')}${field("phone", "Teléfono con indicativo de país", "tel", c.phone, 'maxlength="40" placeholder="573101234567"')}<div class="span-2">${field("email", "Correo electrónico", "email", c.email, 'maxlength="120"')}</div><div class="span-2">${text("notes", "Notas del cliente", c.notes)}</div></div>`,
-    id ? { id } : {},
+    `<div class="form-grid"><div class="span-2">${field("name", "Nombre completo", "text", c.name, 'required maxlength="120"')}</div>${field("document", "Documento", "text", c.document, 'maxlength="50"')}${field("phone", "Teléfono con indicativo de país", "tel", c.phone, 'maxlength="40" placeholder="573101234567"')}<div class="span-2">${field("email", "Correo electrónico", "email", c.email, 'maxlength="120"')}</div><div class="span-2">${text("notes", "Notas del cliente", c.notes)}</div>${custodyFields}</div>`,
+    ({ custodyWeight, custodyPurity, custodyNote, ...data }, form, key) => {
+      if (custodyWeight) data.custody = { weight: custodyWeight, purity: custodyPurity, note: custodyNote };
+      return mutate("client.save", { ...data, id: id || undefined }, key);
+    },
   );
 }
 function smithModal(id) {
@@ -2970,9 +2985,18 @@ function newUser(id) {
 function clientDetail(id) {
   const c = find("clients", id),
     orders = S.orders.filter((o) => o.clientId === id);
+  const owner = clientCustodyOwner(id);
+  const custody = getBalances().filter(entry => entry.account === "custody" && entry.owner === owner);
+  const history = S.ledger.filter(entry => entry.owner === owner).reverse();
   modal(
     c.name,
-    `<p class="muted">${E(c.document)} · ${E(c.phone)} · ${E(c.email)}</p><p style="font-size:12px;line-height:1.8">${E(c.notes)}</p><div class="section-gap">${orderTable(orders)}</div>`,
+    `<p class="muted">${E(c.document)} · ${E(c.phone)} · ${E(c.email)}</p><p style="font-size:12px;line-height:1.8">${E(c.notes)}</p>
+      ${card("Custodia directa de oro", "Oro entregado a nombre del cliente.", custody.map(entry =>
+        row("Oro · ley " + number(entry.purity), weight(entry.mg)),
+      ).join("") + table(["Fecha", "Ley", "Peso recibido", "Concepto", "Responsable"],
+        history.map(entry => tr([dt(entry.at), entry.purity, weight(entry.mg), E(entry.note), E(entry.actor)])).join(""),
+        "Aún no hay ingresos de custodia directa.",
+      ))}<div class="section-gap">${orderTable(orders)}</div>`,
   );
 }
 function materialModal() {
@@ -3402,7 +3426,7 @@ async function exportData(type, id) {
           x.purity,
           x.mg / 1000,
           x.fineUg / 1e6,
-          x.owner === "taller" ? "Taller" : find("orders", x.owner)?.code,
+          metalOwnerLabel(x.owner),
           x.actor,
           x.note,
           x.reversedAt ? "Reversado" : x.ref?.startsWith("REV-") ? "Compensación" : "Registrado",
@@ -4069,7 +4093,7 @@ async function handleAction(action, id, el) {
           row("Fino equivalente", fine(x.fineUg)) +
           row(
             "Propietario",
-            E(x.owner === "taller" ? "Taller" : find("orders", x.owner)?.code),
+            E(metalOwnerLabel(x.owner)),
           ) +
           `<p class="muted section-gap">${E(measurementNote(x.note))}</p>`,
       );

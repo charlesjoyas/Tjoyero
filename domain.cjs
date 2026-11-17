@@ -431,6 +431,16 @@ function execute(s, action, b, a) {
         notes: str(b.notes, "Notas", 2000, false),
         createdAt: existing?.createdAt || now(),
       };
+      if (b.custody !== undefined) {
+        assert(existing && !existing.internal, "Selecciona un cliente registrado para recibir oro en custodia.");
+        assert(b.custody && typeof b.custody === "object" && !Array.isArray(b.custody), "Registro de custodia inválido.");
+        move(
+          s, a, "cliente", "custody",
+          grams(b.custody.weight, "Peso de oro en custodia"),
+          "oro", purity(b.custody.purity), "cliente:" + existing.id,
+          "CUSTODIA", str(b.custody.note, "Concepto y soporte de custodia", 1000),
+        );
+      }
       if (existing) Object.assign(existing, x);
       else s.clients.push(x);
       return x;
@@ -1930,10 +1940,14 @@ function validateState(s, { backup = false } = {}) {
       x.fineUg === x.mg * x.purity,
       "El fino del libro no corresponde al peso y la ley.",
     );
-    assert(
-      x.owner === "taller" || orders.has(x.owner),
-      "Propietario de metal inexistente.",
-    );
+    const isClientCustody = typeof x.owner === "string" && x.owner.startsWith("cliente:");
+    if (isClientCustody) {
+      assert(clients.has(x.owner.slice("cliente:".length)), "Custodia manual sin cliente válido.");
+      assert(x.from === "cliente" && x.to === "custody" && x.metal === "oro" && x.ref === "CUSTODIA",
+        "Movimiento de custodia manual inválido.");
+    } else {
+      assert(x.owner === "taller" || orders.has(x.owner), "Propietario de metal inexistente.");
+    }
   }
   assert(
     balances(s).every((x) => Number.isSafeInteger(x.mg) && x.mg >= 0),
