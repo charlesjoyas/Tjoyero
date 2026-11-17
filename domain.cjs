@@ -222,11 +222,13 @@ function move(s, a, from, to, mg, m, p, owner, ref, note) {
   assert(Number.isSafeInteger(mg) && mg >= 0, "Movimiento de peso no válido.");
   if (!mg) return;
   assert(from !== to, "El origen y el destino deben ser distintos.");
-  if (ACCOUNTS[from])
+  if (ACCOUNTS[from]) {
+    const available = balance(s, from, m, p, owner);
     assert(
-      balance(s, from, m, p, owner) >= mg,
-      `Existencia insuficiente en ${ACCOUNTS[from]} (${m}, ley ${p}).`,
+      available >= mg,
+      `Existencia insuficiente en ${ACCOUNTS[from]} (${m}, ley ${p}). Solicitado: ${Numbers.format(mg / 1000, 1, 3)} g. Disponible: ${Numbers.format(available / 1000, 1, 3)} g.`,
     );
+  }
   s.ledger.push({
     id: id(),
     at: now(),

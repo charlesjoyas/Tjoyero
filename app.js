@@ -213,10 +213,10 @@ const option = (val, label, selected) =>
   `<option value="${E(val)}"${String(val) === String(selected) ? " selected" : ""}>${E(typeof val === "number" && String(label) === String(val) ? number(val) : label)}</option>`;
 const select = (name, label, options, value, help = "") =>
   `<label class="field"><span>${E(label)}</span><select name="${name}" required>${options.map((x) => option(Array.isArray(x) ? x[0] : x, Array.isArray(x) ? x[1] : x, value)).join("")}</select>${help ? `<small>${E(help)}</small>` : ""}</label>`;
-const field = (name, label, type = "text", value = "", extra = "") => {
+const field = (name, label, type = "text", value = "", extra = "", minimumDecimals) => {
   if (type === "number") {
     const step = extra.match(/step="([^"]+)"/)?.[1] || "1";
-    const decimals = extra.includes("weight-value") ? 3 : 2;
+    const decimals = minimumDecimals ?? (extra.includes("weight-value") ? 3 : 2);
     const maximum = Math.max(decimals, (step.split(".")[1] || "").length);
     return `<label class="field"><span>${E(label)}</span><input name="${name}" type="text" inputmode="decimal" data-number="true" data-decimals="${decimals}" data-maximum-decimals="${maximum}" value="${value === "" ? "" : E(number(Number(value), decimals, maximum))}" ${extra.replace(/inputmode="[^"]*"/g, "")}></label>`;
   }
@@ -235,7 +235,7 @@ const moneyField = (name, label, val = 0) =>
     val,
     'min="0" max="1000000000000" step="1" required data-number-kind="money"',
   );
-const weightField = (name, label, val = "", zero = false) =>
+const weightField = (name, label, val = "", zero = false, minimumDecimals = 3) =>
   '<div class="weight-control">' +
   field(
     name,
@@ -243,6 +243,7 @@ const weightField = (name, label, val = "", zero = false) =>
     "number",
     val,
     `min="${zero ? 0 : 0.001}" step="0.001" required class="weight-value" inputmode="decimal"`,
+    minimumDecimals,
   ) +
   (serialPort
     ? '<div class="actions" style="margin-top:6px">' +
@@ -2516,7 +2517,7 @@ function editOrder(id) {
 }
 let assignmentMetalIndex = 0;
 function assignmentMetalRow(index) {
-  return `<section class="card section-gap own-assignment-row" data-metal-index="${index}"><div class="card-head"><h3>Metal propio adicional</h3>${button("Quitar","remove-assignment-metal","","small",String(index))}</div><div class="form-grid">${select("ownMetal-"+index,"Metal",metals().map(x=>[x.id,x.name]),"oro")}${field("ownPurity-"+index,"Ley (milésimas)","number",750,'required min="1" max="1000" step="1"')}${weightField("ownWeight-"+index,"Peso a mesa (g)","")}${select("ownSource-"+index,"Origen",[["own","Bodega propia"],["payment","Recibido como pago"],["melt","Fundido / aleado"]],"own")}</div><p class="muted" data-assignment-available></p></section>`;
+  return `<section class="card section-gap own-assignment-row" data-metal-index="${index}"><div class="card-head"><h3>Metal propio adicional</h3>${button("Quitar","remove-assignment-metal","","small",String(index))}</div><div class="form-grid">${select("ownMetal-"+index,"Metal",metals().map(x=>[x.id,x.name]),"oro")}${field("ownPurity-"+index,"Ley (milésimas)","number",750,'required min="1" max="1000" step="1"')}${weightField("ownWeight-"+index,"Peso a mesa (g)","",false,1)}${select("ownSource-"+index,"Origen",[["own","Bodega propia"],["payment","Recibido como pago"],["melt","Fundido / aleado"]],"own")}</div><p class="muted" data-assignment-available></p></section>`;
 }
 function updateAssignmentAvailability() {
   const form=$("#modal-form");if(!form)return;
@@ -2559,7 +2560,7 @@ function assignOrder(id) {
         "Orfebre",
         S.smiths.map((x) => [x.id, x.name + " · " + x.bench]),
         "",
-      )}${moneyField("smithFee", "Honorarios de este trabajo · COP", 0)}<div class="span-2">${weightField("customerWeight", "Metal del cliente a mesa (g)", balance("custody", o.metal, o.purity, o.id) / 1000, true)}</div>${select(
+      )}${moneyField("smithFee", "Honorarios de este trabajo · COP", 0)}<div class="span-2">${weightField("customerWeight", "Metal del cliente a mesa (g)", balance("custody", o.metal, o.purity, o.id) / 1000, true, 1)}</div>${select(
         "source",
         "Origen del metal propio",
         [
@@ -2568,7 +2569,7 @@ function assignOrder(id) {
           ["melt", "Fundido / aleado"],
         ],
         "own",
-      )}${select("ownPurity", "Ley del metal propio", assignmentPurityOptions(stock, o.purity, "own"), o.purity)}${weightField("ownWeight", "Metal propio a mesa (g)", 0, true)}<div class="span-2"><div id="assignment-metals"></div>${button("Añadir otro metal propio","add-assignment-metal","plus","small")}</div></div>`,
+      )}${select("ownPurity", "Ley del metal propio", assignmentPurityOptions(stock, o.purity, "own"), o.purity)}${weightField("ownWeight", "Metal propio a mesa (g)", 0, true, 1)}<div class="span-2"><div id="assignment-metals"></div>${button("Añadir otro metal propio","add-assignment-metal","plus","small")}</div></div>`,
     (b,form,key)=>mutate("order.assign",{id,smithId:b.smithId,smithFee:b.smithFee,customerWeight:b.customerWeight,ownWeight:b.ownWeight,ownPurity:b.ownPurity,source:b.source,
       ownMetals: $$(".own-assignment-row",form).map(row=>{const i=row.dataset.metalIndex;return {metal:b["ownMetal-"+i],purity:b["ownPurity-"+i],weight:b["ownWeight-"+i],source:b["ownSource-"+i]};})},key),
     "Registrar salida y asignar",
