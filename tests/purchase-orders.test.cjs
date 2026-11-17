@@ -23,6 +23,33 @@ test("Orden de compra: pagos y reversión no duplican inventario y bloquean meta
   act("inventory.transfer",{from:"own",to:"melt",metal:"oro",purity:585,weight:1,reason:"Apartado para fundición"});
   const before=structuredClone(s);assert.throws(()=>act("operation.reverse",{type:"purchase",id:p.id,reason:"Devolución",confirmed:true}),/insuficiente/);assert.deepEqual(s,before,"No devuelve la primera categoría si falta la segunda");
 });
+test("Orden de compra: plata editable en copias anteriores y saldos separados en una compra mixta", () => {
+  const {s, act, supplier} = fixture();
+  delete s.settings.metalCategories;
+  const silver = act("category.save", { id: "silver-925", name: "Plata", purity: 900 });
+  assert.equal(silver.metal, "plata");
+  const purchase = act("purchase.create", {
+    supplierId: supplier.id, document: "COMPRA MIXTA", dueDate: "2026-12-01",
+    items: [
+      { categoryId: silver.id, purity: 900, weight: 2, unitPrice: 3000 },
+      { categoryId: "gold-18k", purity: 750, weight: 1, unitPrice: 300000 },
+    ],
+  });
+  assert.equal(purchase.total, 306000);
+  assert.equal(D.balance(s, "own", "plata", 900), 2000);
+  assert.equal(D.balance(s, "own", "oro", 900), 0);
+  assert.equal(D.balance(s, "own", "oro", 750), 1000);
+  act("category.save", { id: silver.id, name: "Plata", purity: 925 });
+  assert.equal(s.purchases[0].items[0].purity, 900);
+  assert.throws(() => act("purchase.create", {
+    supplierId: supplier.id, document: "LEY ANTERIOR", dueDate: "2026-12-01",
+    items: [{ categoryId: silver.id, purity: 900, weight: 1, unitPrice: 3000 }],
+  }), error => error.status === 409);
+  act("category.delete", { id: silver.id });
+  act("operation.reverse", { type: "purchase", id: purchase.id, reason: "Material devuelto", confirmed: true });
+  assert.equal(D.balance(s, "own", "plata", 900), 0);
+  assert.equal(D.balance(s, "own", "oro", 750), 0);
+});
 test("Orden de compra: rechaza categorías inválidas, importes, permisos y detalles corruptos",()=>{
   const f=fixture(),{s,act,supplier,items}=f,before=structuredClone(s),body={supplierId:supplier.id,document:"FACT-003",dueDate:"2026-12-01",items};
   for(const bad of [[],null,[null],[{...items[0],categoryId:"no-existe"}],[{...items[0],unitPrice:0}],[{...items[0],unitPrice:1.5}],[{...items[0],weight:0}],[{...items[0],weight:1.0001}],[{...items[0],weight:1000000,unitPrice:1000000000000}]]){assert.throws(()=>act("purchase.create",{...body,items:bad}));assert.deepEqual(s,before);}

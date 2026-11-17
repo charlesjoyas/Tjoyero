@@ -143,6 +143,15 @@ function defaultGoldCategories() {
     { id: "gold-fine", name: "Oro fino puro", purity: 1000, active: true },
   ];
 }
+function defaultMetalCategories() {
+  return [{ id: "silver-925", name: "Plata", metal: "plata", purity: 925, active: true }];
+}
+function purchaseCategories(s) {
+  return [
+    ...(s.settings.goldCategories ?? defaultGoldCategories()).map(category => ({ ...category, metal: "oro" })),
+    ...(s.settings.metalCategories ?? defaultMetalCategories()),
+  ];
+}
 function initialState() {
   return {
     version: 1,
@@ -150,6 +159,7 @@ function initialState() {
     settings: {
       metals: defaultMetals(),
       goldCategories: defaultGoldCategories(),
+      metalCategories: defaultMetalCategories(),
       name: "Mi taller joyero",
       nit: "",
       phone: "",
@@ -392,26 +402,30 @@ function execute(s, action, b, a) {
     }
     case "category.delete": {
       permit(a, "settings");
-      const categories = s.settings.goldCategories || defaultGoldCategories();
-      const category = categories.find((x) => x.id === b.id);
+      const category = purchaseCategories(s).find((x) => x.id === b.id);
       assert(category, "Categoría no encontrada.", 404);
-      s.settings.goldCategories = categories.filter((x) => x.id !== category.id);
+      const key = category.metal === "oro" ? "goldCategories" : "metalCategories";
+      const categories = s.settings[key] ?? (category.metal === "oro" ? defaultGoldCategories() : defaultMetalCategories());
+      s.settings[key] = categories.filter((x) => x.id !== category.id);
       return { id: category.id, name: category.name };
     }
     case "category.save": {
       permit(a, "settings");
-      const categories = s.settings.goldCategories || defaultGoldCategories();
-      const existing = b.id ? categories.find((x) => x.id === b.id) : null;
+      const existing = b.id ? purchaseCategories(s).find((x) => x.id === b.id) : null;
       assert(!b.id || existing, "Categoría no encontrada.", 404);
+      const categoryMetal = metal(b.metal ?? existing?.metal ?? "oro", s);
+      assert(!existing || categoryMetal === existing.metal, "El metal de una categoría existente no se puede cambiar.");
+      const key = categoryMetal === "oro" ? "goldCategories" : "metalCategories";
+      const categories = s.settings[key] ?? (categoryMetal === "oro" ? defaultGoldCategories() : defaultMetalCategories());
       const name = str(b.name, "Nombre de la categoría", 80);
-      assert(!categories.some((x) => x.id !== b.id && x.name.toLocaleLowerCase("es-CO") === name.toLocaleLowerCase("es-CO")), "Ya existe una categoría con ese nombre.");
+      assert(!categories.some((x) => x.id !== b.id && (x.metal ?? "oro") === categoryMetal &&
+        x.name.toLocaleLowerCase("es-CO") === name.toLocaleLowerCase("es-CO")), "Ya existe una categoría con ese nombre para este metal.");
       const law = purity(b.purity);
       assert(b.active === undefined || typeof b.active === "boolean" || ["true", "false"].includes(b.active), "Estado de categoría inválido.");
       assert(existing || categories.length < 200, "Puedes registrar hasta 200 categorías.");
       const category = { id: existing?.id || id(), name, purity: law, active: b.active !== false && b.active !== "false" };
-      if (existing) Object.assign(existing, category);
-      else categories.push(category);
-      s.settings.goldCategories = categories;
+      if (categoryMetal !== "oro") category.metal = categoryMetal;
+      s.settings[key] = existing ? categories.map(x => x.id === category.id ? category : x) : [...categories, category];
       return category;
     }
     case "client.save": {
@@ -1377,18 +1391,20 @@ function execute(s, action, b, a) {
       let items, m, p, mg, unit, value;
       if(b.items!==undefined){
         assert(Array.isArray(b.items)&&b.items.length>0&&b.items.length<=50,"Añade entre una y 50 categorías a la orden de compra.");
-        const categories=s.settings.goldCategories||defaultGoldCategories();
+        const categories = purchaseCategories(s);
         items=b.items.map(input=>{
           assert(input&&typeof input==="object","Detalle de compra inválido.");
           const category=categories.find(x=>x.id===input.categoryId);
-          assert(category&&category.active,"La categoría de oro no existe o está inactiva. Actualiza la orden.");
+          assert(category&&category.active,"La categoría de metal no existe o está inactiva. Actualiza la orden.");
+          assert(input.purity === undefined || input.purity === category.purity,
+            "La ley de la categoría cambió. Vuelve a abrir la orden y revisa el precio.", 409);
           const weight=grams(input.weight),price=money(input.unitPrice,"Precio por gramo de la categoría");
           assert(price>0,"El precio por gramo debe ser mayor a cero.");
           let total;try{total=Numbers.weightPrice(weight,price);}catch(error){fail(error.message);}
           assert(total>0,"El valor de cada categoría debe ser al menos un peso.");
-          return {categoryId:category.id,categoryName:category.name,metal:"oro",purity:category.purity,mg:weight,unitPrice:price,total};
+          return {categoryId:category.id,categoryName:category.name,metal:category.metal,purity:category.purity,mg:weight,unitPrice:price,total};
         });
-        m="oro";p=items[0].purity;mg=items.reduce((sum,x)=>sum+x.mg,0);unit=items[0].unitPrice;
+        m=items[0].metal;p=items[0].purity;mg=items.reduce((sum,x)=>sum+x.mg,0);unit=items[0].unitPrice;
         assert(mg<=1000000000,"El peso total de la compra no puede superar 1.000.000 g.");
         value=money(items.reduce((sum,x)=>sum+x.total,0),"Total de la orden de compra");
       }else{
@@ -1839,6 +1855,23 @@ function validateState(s, { backup = false } = {}) {
       names.add(name);
     }
   }
+  if (s.settings.metalCategories !== undefined) {
+    const categories = s.settings.metalCategories;
+    assert(Array.isArray(categories) && categories.length <= 200, "Catálogo de metales por ley inválido.");
+    const ids = new Set((s.settings.goldCategories ?? defaultGoldCategories()).map(category => category.id));
+    const names = new Set();
+    for (const category of categories) {
+      assert(category && typeof category.id === "string" && category.id && !ids.has(category.id),
+        "Identificador de categoría inválido o duplicado.");
+      const categoryMetal = metal(category.metal, s);
+      assert(categoryMetal !== "oro", "Las categorías de oro pertenecen al catálogo de oro.");
+      const key = categoryMetal + "|" + str(category.name, "Nombre de la categoría", 80).toLocaleLowerCase("es-CO");
+      assert(!names.has(key) && typeof category.active === "boolean", "Categoría duplicada o estado inválido.");
+      purity(category.purity);
+      ids.add(category.id);
+      names.add(key);
+    }
+  }
   if(s.reversals!==undefined) {
     assert(Array.isArray(s.reversals),"Historial de reversiones inválido.");
     const keys=new Set();
@@ -2093,15 +2126,16 @@ function validateState(s, { backup = false } = {}) {
     assert(suppliers.has(p.supplierId), "Compra sin proveedor.");
     money(p.total, "Total de compra");
     if(p.items!==undefined){
-      assert(Array.isArray(p.items)&&p.items.length>0&&p.items.length<=50&&p.priceBasis==="gross"&&p.metal==="oro","Detalle de orden de compra inválido.");
+      assert(Array.isArray(p.items)&&p.items.length>0&&p.items.length<=50&&p.priceBasis==="gross","Detalle de orden de compra inválido.");
       for(const item of p.items){
-        assert(item&&item.metal==="oro"&&typeof item.categoryId==="string"&&item.categoryId.length>0&&item.categoryId.length<=100,"Categoría de compra inválida.");
+        assert(item&&typeof item.categoryId==="string"&&item.categoryId.length>0&&item.categoryId.length<=100,"Categoría de compra inválida.");
+        metal(item.metal, s);
         str(item.categoryName,"Categoría histórica",80);purity(item.purity);money(item.unitPrice,"Precio por gramo");
         assert(Number.isSafeInteger(item.mg)&&item.mg>0&&item.mg<=1000000000&&item.unitPrice>0,"Peso o precio de compra inválido.");
         let calculated;try{calculated=Numbers.weightPrice(item.mg,item.unitPrice);}catch(error){fail(error.message);}
         assert(calculated===item.total&&item.total>0,"El importe por categoría no corresponde al peso y precio.");
       }
-      assert(Number.isSafeInteger(p.mg)&&p.mg<=1000000000&&p.items.reduce((sum,item)=>sum+item.mg,0)===p.mg&&p.items.reduce((sum,item)=>sum+item.total,0)===p.total&&p.purity===p.items[0].purity&&p.rate===p.items[0].unitPrice,"Los detalles no concilian con el total de compra.");
+      assert(Number.isSafeInteger(p.mg)&&p.mg<=1000000000&&p.items.reduce((sum,item)=>sum+item.mg,0)===p.mg&&p.items.reduce((sum,item)=>sum+item.total,0)===p.total&&p.metal===p.items[0].metal&&p.purity===p.items[0].purity&&p.rate===p.items[0].unitPrice,"Los detalles no concilian con el total de compra.");
     }
     assert(
       s.supplierPayments
@@ -2180,6 +2214,7 @@ module.exports = {
   EXPENSE_CATEGORIES,
   defaultMetals,
   defaultGoldCategories,
+  defaultMetalCategories,
   validateState,
   initialState,
   execute,

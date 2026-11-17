@@ -256,8 +256,18 @@ let expenseCategories = [];
 const metalSelect = (value = "oro", label = "Metal") =>
   select("metal", label, metals().map((x) => [x.id, x.name]), value);
 const goldCategories = () => S?.settings?.goldCategories || [];
+const metalCategories = () => [
+  ...goldCategories().map(category => ({ ...category, metal: "oro" })),
+  ...(S?.settings?.metalCategories || []),
+];
+const metalLabel = id => metals().find(metal => metal.id === id)?.name || id;
+const categoryOptions = metal => [
+  ["", "Elegir categoría / ley manual"],
+  ...metalCategories().filter(category => category.metal === metal && category.active)
+    .map(category => [category.id, category.name + " · ley " + number(category.purity)]),
+];
 const categorySelect = (name) =>
-  `<div class="field"><label for="category-${E(name)}">Categoría de oro</label><select class="control" id="category-${E(name)}" data-gold-category="${E(name)}"><option value="">Elegir categoría / ley manual</option>${goldCategories().filter((x) => x.active).map((x) => `<option value="${E(x.id)}">${E(x.name)} · ley ${number(x.purity)}</option>`).join("")}</select></div>`;
+  `<div class="field"><label for="category-${E(name)}">Categoría del metal</label><select class="control" id="category-${E(name)}" data-gold-category="${E(name)}">${categoryOptions("oro").map(([id, label]) => option(id, label, "")).join("")}</select></div>`;
 const goldLawOptions = () => goldCategories().filter((x) => x.active).map((x) => `<option value="${number(x.purity)}">${E(x.name)}</option>`).join("");
 const puritySelect = (name = "purity", value = 750) =>
   categorySelect(name) +
@@ -270,7 +280,7 @@ const puritySelect = (name = "purity", value = 750) =>
   ) +
   '<datalist id="purities-' +
   name +
-  '">' + goldLawOptions() + '<option value="925,00">Plata 925</option><option value="950,00">950</option></datalist>';
+  '">' + goldLawOptions() + '</datalist>';
 const empty = (title, desc, action = "") =>
   `<div class="empty">${icon("gem")}<h3>${E(title)}</h3><p>${E(desc)}</p>${action}</div>`;
 const notice = (title, desc = "", color = "") =>
@@ -1948,9 +1958,9 @@ function purchasesPage() {
     head(
       "EL ORIGEN DE TUS MATERIALES",
       "Órdenes de compra y proveedores",
-      "Compra de oro por categoría, ingreso a bodega y cuentas por pagar.",
+      "Compra por categoría de metal, ingreso a bodega y cuentas por pagar.",
       allowed("purchases", "Nuevo proveedor", "new-supplier", "plus") +
-        allowed("purchases", "Compra de otro metal", "new-metal-purchase", "gold") +
+        allowed("purchases", "Compra con ley manual", "new-metal-purchase", "gold") +
         allowed(
           "purchases",
           "Nueva orden de compra",
@@ -1980,7 +1990,7 @@ function purchasesPage() {
           return tr([
             `<strong>${E(x.code)}</strong>${reversalBadge(x)}<small>${E(x.document)} · ${dt(x.at)}</small>`,
             E(find("suppliers", x.supplierId)?.name),
-            purchaseItems(x).map(item=>`<div>${E(item.categoryName)}<small>${weight(item.mg)} · ley ${number(item.purity)}</small></div>`).join(""),
+            purchaseItems(x).map(item=>`<div>${E(item.categoryName)}<small>${E(metalLabel(item.metal))} · ley ${number(item.purity)} · ${weight(item.mg)}</small></div>`).join(""),
             weight(x.mg),
             cop(x.total),
             `<span style="color:var(--debt)">${cop(pending)}</span>`,
@@ -2356,20 +2366,39 @@ function reverseOperationModal(type="purchase",targetId="",mode="reverse") {
   });
 }
 function categoriesPage() {
-  return head("EL ORO DE TU TALLER", "Categorías de oro", "Define los tipos de oro y su ley en milésimas para usarlos en las operaciones del taller.", button("Nueva categoría", "new-category", "plus", "primary")) +
-    card("Catálogo de oro", "La ley determina el contenido de oro fino. Editar o eliminar una categoría conserva las leyes de los movimientos ya registrados.", table(["Categoría", "Ley (milésimas)", "Estado", ""], goldCategories().map((x) => tr([E(x.name), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"), `<div class="actions">${button("Editar", "edit-category", "edit", "small", x.id)}${button("Eliminar", "delete-category", "", "small danger", x.id)}</div>`])).join("")));
+  return head("METALES DEL TALLER", "Categorías de metales", "Configura las leyes de los metales que usas en compras e inventario.", button("Nueva categoría", "new-category", "plus", "primary")) +
+    card("Catálogo de leyes", "Los cambios de ley se aplican a las operaciones nuevas.", table(
+      ["Categoría", "Metal", "Ley (milésimas)", "Estado", ""],
+      metalCategories().map(x => tr([
+        E(x.name), E(metalLabel(x.metal)), number(x.purity), badge(x.active ? "Activa" : "Inactiva", x.active ? "green" : "amber"),
+        `<div class="actions">${button("Editar", "edit-category", "edit", "small", x.id)}${button("Eliminar", "delete-category", "", "small danger", x.id)}</div>`,
+      ])).join(""),
+    ));
 }
 function categoryModal(id) {
-  const x = goldCategories().find((x) => x.id === id) || {};
-  simpleModal(id ? "Editar categoría de oro" : "Nueva categoría de oro", "category.save",
-    `<div class="form-grid"><div class="span-2">${field("name", "Nombre de la categoría", "text", x.name || "", 'required maxlength="80" placeholder="Ej. Oro 16k"')}</div>${field("purity", "Ley en milésimas", "number", x.purity ?? 750, 'min="1" max="1000" step="1" required')}${select("active", "Estado", [["true", "Activa"], ["false", "Inactiva"]], String(x.active ?? true))}<p class="muted span-2">Ejemplos: oro 18k = 750; oro 14k = 585. Usa la ley ensayada de tu material. Las categorías inactivas dejan de aparecer en los formularios.</p></div>`, id ? {id} : {});
+  const x = metalCategories().find(category => category.id === id) || {};
+  simpleModal(id ? "Editar categoría de metal" : "Nueva categoría de metal", "category.save",
+    `<div class="form-grid"><div class="span-2">${field("name", "Nombre de la categoría", "text", x.name || "", 'required maxlength="80"')}</div>
+      ${id ? field("metalLabel", "Metal", "text", metalLabel(x.metal), "readonly") : metalSelect()}
+      ${field("purity", "Ley en milésimas", "number", x.purity ?? 750, 'min="1" max="1000" step="1" required')}
+      ${select("active", "Estado", [["true", "Activa"], ["false", "Inactiva"]], String(x.active ?? true))}
+      <p class="muted span-2">Usa la ley ensayada de tu material. Las categorías inactivas dejan de aparecer en los formularios.</p></div>`, id ? { id } : {});
 }
 function syncMetalFields(form) {
   if (!form?.elements.metal) return;
-  const isGold = form.elements.metal.value === "oro";
+  const metal = form.elements.metal.value;
+  const options = categoryOptions(metal);
   $$("[data-gold-category]", form).forEach((el) => {
-    el.closest(".field").hidden = !isGold;
-    el.disabled = !isGold;
+    const selected = el.value;
+    el.innerHTML = options.map(([id, label]) => option(id, label, selected)).join("");
+    el.closest(".field").hidden = options.length === 1 && metal !== "oro";
+    el.disabled = el.closest(".field").hidden;
+    const field = form.elements.namedItem(el.dataset.goldCategory);
+    const list = field?.list;
+    if (list) {
+      list.innerHTML = metalCategories().filter(category => category.active && category.metal === metal)
+        .map(category => option(number(category.purity), category.name, "")).join("");
+    }
   });
 }
 function settingsPage() {
@@ -2846,37 +2875,50 @@ function closeShift() {
 }
 let purchaseRowIndex=0;
 function purchaseCategoryRow(index) {
-  return `<section class="card section-gap" data-purchase-row="${index}"><div class="card-head"><h3>Oro a comprar</h3>${button("Quitar","remove-purchase-row","","small",String(index))}</div><div class="form-grid">${select("purchaseCategory-"+index,"Categoría de oro",[["","Elegir categoría"],...goldCategories().filter(x=>x.active).map(x=>[x.id,x.name+" · ley "+number(x.purity)])],"")}${weightField("purchaseWeight-"+index,"Peso recibido (g)","")}${moneyField("purchasePrice-"+index,"Precio por gramo de esta categoría · COP","")}<div class="field"><span>Valor de esta categoría</span><strong data-purchase-subtotal>${cop(0)}</strong></div></div><p class="muted">El total se calcula con el peso recibido de esta categoría. El fino se registra aparte.</p></section>`;
+  const options = metalCategories().filter(x => x.active)
+    .map(x => [x.id, metalLabel(x.metal) + " · " + x.name + " · ley " + number(x.purity)]);
+  return `<section class="card section-gap" data-purchase-row="${index}"><div class="card-head"><h3>Metal a comprar</h3>${button("Quitar","remove-purchase-row","","small",String(index))}</div><div class="form-grid">${select("purchaseCategory-"+index,"Categoría del metal",[["","Elegir categoría"],...options],"")}${weightField("purchaseWeight-"+index,"Peso recibido (g)","")}${moneyField("purchasePrice-"+index,"Precio por gramo de esta categoría · COP","")}<div class="field"><span>Valor de esta categoría</span><strong data-purchase-subtotal>${cop(0)}</strong></div></div><p class="muted">El total se calcula con el peso recibido de esta categoría. El fino se registra aparte.</p></section>`;
 }
 function updatePurchaseOrderPreview() {
   const form=$("#modal-form"),target=$("#purchase-order-preview",form);if(!target)return;
   let total=0,mg=0;const weights=new Map();
   try{
     $$("[data-purchase-row]",form).forEach(row=>{
-      const index=row.dataset.purchaseRow,category=goldCategories().find(x=>x.id===form.elements["purchaseCategory-"+index].value);
+      const index=row.dataset.purchaseRow,category=metalCategories().find(x=>x.id===form.elements["purchaseCategory-"+index].value);
       const rawWeight=numericValue(form.elements["purchaseWeight-"+index]),weight=Math.round(rawWeight*1000),price=numericValue(form.elements["purchasePrice-"+index]);
       const value=N.weightPrice(weight,price);total+=value;mg+=weight;
       if(total>1e12||mg>1e9)throw new Error("El total o el peso de la compra supera el máximo permitido.");
       $("[data-purchase-subtotal]",row).textContent=cop(value);
-      if(category){const key=category.purity;weights.set(key,(weights.get(key)||0)+weight);}
+      if (category) {
+        const key = PM.key(category);
+        const entry = weights.get(key) || { metal: category.metal, purity: category.purity, mg: 0 };
+        entry.mg += weight;
+        weights.set(key, entry);
+      }
     });
-    target.innerHTML=row("Peso total recibido",weight(mg))+row("TOTAL ORDEN DE COMPRA",cop(total),"total")+[...weights].map(([purity,mg])=>row("Ingreso a bodega · oro ley "+number(purity),weight(mg))).join("");
+    target.innerHTML=row("Peso total recibido",weight(mg))+row("TOTAL ORDEN DE COMPRA",cop(total),"total")+[...weights.values()].map(entry=>row("Ingreso a bodega · "+metalLabel(entry.metal)+" ley "+number(entry.purity),weight(entry.mg))).join("");
   }catch(error){target.textContent=error.message;}
 }
 function newPurchase() {
   if(!S.suppliers.length)return newMetalPurchase();
-  if(!goldCategories().some(x=>x.active))return modal("Necesitas una categoría de oro",notice("No hay categorías activas","Activa o registra una categoría de oro antes de comprar.","amber")+allowed("settings","Nueva categoría","new-category","plus","primary"));
+  const categories = metalCategories();
+  if(!categories.some(x=>x.active))return modal("Necesitas una categoría de metal",notice("No hay categorías activas","Activa o registra una categoría antes de comprar.","amber")+allowed("settings","Nueva categoría","new-category","plus","primary"));
   purchaseRowIndex=1;
-  modal("Nueva orden de compra de oro",
+  modal("Nueva orden de compra",
     notice("Compra recibida: ingresa al inventario al confirmar","Los gramos de cada categoría se registran en bodega propia con su ley. La compra crea una cuenta por pagar; el pago al proveedor se registra por separado.","blue")+
     `<div class="form-grid"><div class="span-2">${select("supplierId","Proveedor",S.suppliers.map(x=>[x.id,x.name]),S.suppliers[0].id)}</div>${field("document","Documento / soporte de compra","text","",'required maxlength="100"')}${field("dueDate","Fecha de vencimiento","date",today(),"required")}</div><div id="purchase-category-rows">${purchaseCategoryRow(0)}</div><div class="actions section-gap">${button("Añadir categoría","add-purchase-row","plus","small")}</div><div id="purchase-order-preview" class="calculator section-gap"></div>`,
     (b,form,key)=>mutate("purchase.create",{supplierId:b.supplierId,document:b.document,dueDate:b.dueDate,
-      items:$$("[data-purchase-row]",form).map(row=>{const i=row.dataset.purchaseRow;return {categoryId:b["purchaseCategory-"+i],weight:b["purchaseWeight-"+i],unitPrice:b["purchasePrice-"+i]};})},key),"Confirmar compra e ingresar a inventario");
+      items: $$("[data-purchase-row]", form).map(row => {
+        const index = row.dataset.purchaseRow;
+        const categoryId = b["purchaseCategory-" + index];
+        return { categoryId, purity: categories.find(x => x.id === categoryId)?.purity,
+          weight: b["purchaseWeight-" + index], unitPrice: b["purchasePrice-" + index] };
+      })},key),"Confirmar compra e ingresar a inventario");
   const form=$("#modal-form");
   form.addEventListener("change",event=>{
     if(event.target.name?.startsWith("purchaseCategory-")){
-      const i=event.target.name.slice("purchaseCategory-".length),category=goldCategories().find(x=>x.id===event.target.value);
-      if(category)setNumericValue(form.elements["purchasePrice-"+i],Math.round(S.settings.rate.oro*category.purity/1000));
+      const i=event.target.name.slice("purchaseCategory-".length),category=categories.find(x=>x.id===event.target.value);
+      if(category)setNumericValue(form.elements["purchasePrice-"+i],Math.round((S.settings.rate[category.metal] ?? 0)*category.purity/1000));
     }
     updatePurchaseOrderPreview();
   });
@@ -3391,8 +3433,8 @@ async function exportData(type, id) {
     inRange = (at) => at && dayKey(at) >= from && dayKey(at) <= to;
   if(type==="gems")return excel("inventario-piedras",["Código","Piedra","Tipo","Cantidad inicial","Cantidad disponible","Quilates iniciales ct","Quilates disponibles ct","Costo total COP","Costo disponible COP","Precio sugerido unidad COP","Talla","Medidas","Certificado","Observaciones","Estado entrada"],(S.gemstoneLots||[]).filter(x=>!x.deletedAt).map(x=>[x.code,x.name,x.individual?"Individual":"Lote",x.quantity,x.available,x.caratMilli/1000,x.remainingCaratMilli/1000,x.cost,x.remainingCost,x.unitPrice,x.cut,x.measurements,x.certificate,x.notes,x.reversedAt?"Reversada":"Vigente"]));
   if(type==="gem-orders")return excel("piedras-por-trabajo",["Orden","Cliente","Piedra","Propietario","Unidades","Quilates ct","Estado","Costo COP","Precio acordado COP","Precio incluido COP","Lote propio","Certificado","Estado recibido","Talla","Medidas","Observaciones"],S.orders.filter(o=>!o.deletedAt).flatMap(o=>(o.stones||[]).map(x=>[o.code,client(o),x.name,x.owner==="cliente"?"Cliente · custodia":"Taller",x.quantity,x.caratMilli===null?null:x.caratMilli/1000,stoneStatuses[x.status],x.cost,x.price,x.owner==="taller"&&!["returned","lost"].includes(x.status)?x.price:0,(S.gemstoneLots||[]).find(l=>l.id===x.stockId)?.code||"",x.certificate,x.condition||"",x.cut,x.measurements,x.notes])));
-  if(type==="purchases")return excel("ordenes-compra",["Orden","Fecha","Proveedor","Documento","Categoría / metal","Ley","Peso g","Precio por gramo COP","Base del precio","Subtotal COP","Total orden COP","Saldo pendiente COP","Vencimiento","Estado"],
-    S.purchases.filter(p=>!p.deletedAt).flatMap(p=>purchaseItems(p).map((item,index)=>[p.code,window.TallerExcel.date(p.at),find("suppliers",p.supplierId)?.name,p.document,item.categoryName,item.purity,item.mg/1000,item.unitPrice,p.priceBasis==="gross"?"Gramo recibido de la categoría":"Gramo fino",item.total,index===0?p.total:null,index===0?purchasePending(p):null,window.TallerExcel.date(p.dueDate),p.reversedAt?"Reversada":"Recibida · inventario ingresado"])));
+  if(type==="purchases")return excel("ordenes-compra",["Orden","Fecha","Proveedor","Documento","Categoría / metal","Ley","Peso g","Precio por gramo COP","Base del precio","Subtotal COP","Total orden COP","Saldo pendiente COP","Vencimiento","Estado","Metal"],
+    S.purchases.filter(p=>!p.deletedAt).flatMap(p=>purchaseItems(p).map((item,index)=>[p.code,window.TallerExcel.date(p.at),find("suppliers",p.supplierId)?.name,p.document,item.categoryName,item.purity,item.mg/1000,item.unitPrice,p.priceBasis==="gross"?"Gramo recibido de la categoría":"Gramo fino",item.total,index===0?p.total:null,index===0?purchasePending(p):null,window.TallerExcel.date(p.dueDate),p.reversedAt?"Reversada":"Recibida · inventario ingresado",metalLabel(item.metal)])));
   if (type === "ledger") {
     const f = filters;
     if (f.ledgerFrom && f.ledgerTo && f.ledgerFrom > f.ledgerTo) throw new Error("La fecha inicial no puede superar la fecha final.");
@@ -3734,9 +3776,9 @@ async function handleAction(action, id, el) {
       categoryModal(id);
       break;
     case "delete-category": {
-      const category = goldCategories().find((x) => x.id === id);
+      const category = metalCategories().find((x) => x.id === id);
       if (!category) throw new Error("Categoría no encontrada.");
-      simpleModal("Eliminar categoría de oro", "category.delete", notice("¿Eliminar " + category.name + "?", "Dejará de aparecer en el catálogo y en los formularios. Las órdenes, los saldos y los movimientos anteriores conservan su ley original.", "amber"), { id }, "Eliminar categoría");
+      simpleModal("Eliminar categoría de metal", "category.delete", notice("¿Eliminar " + category.name + "?", "Dejará de aparecer en el catálogo y en los formularios. Las órdenes, los saldos y los movimientos anteriores conservan su ley original.", "amber"), { id }, "Eliminar categoría");
       break;
     }
     case "edit-supplier":
@@ -4315,7 +4357,7 @@ document.addEventListener("input", (e) => {
   const el = e.target;
   if (el.name && el.form) {
     const categoryField = [...el.form.querySelectorAll("[data-gold-category]")].find((x) => x.dataset.goldCategory === el.name);
-    const category = goldCategories().find((x) => x.id === categoryField?.value);
+    const category = metalCategories().find((x) => x.id === categoryField?.value);
     if (category && numericValue(el) !== category.purity) categoryField.value = "";
   }
   if (el.matches("[data-number]"))
@@ -4360,20 +4402,14 @@ document.addEventListener("input", (e) => {
 document.addEventListener("change", (e) => {
   const el = e.target;
   if (el.name === "metal") syncMetalFields(el.form);
-  if (el.name === "metal" && el.value !== "oro") {
-    el.form?.querySelectorAll("[data-gold-category]").forEach((x) => { x.value = ""; });
-  }
   if (el.matches("[data-gold-category]")) {
-    const category = goldCategories().find((x) => x.id === el.value && x.active);
     const form = el.closest("form");
+    const category = metalCategories().find(x => x.id === el.value && x.active &&
+      x.metal === (form?.elements.metal?.value ?? "oro"));
     if (category && form) {
       const target = form.elements.namedItem(el.dataset.goldCategory);
       if (target) {
         setNumericValue(target, category.purity);
-        if (form.elements.metal) {
-          form.elements.metal.value = "oro";
-          form.elements.metal.dispatchEvent(new Event("change", { bubbles: true }));
-        }
         target.dispatchEvent(new Event("input", { bubbles: true }));
       }
     }
