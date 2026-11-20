@@ -1,0 +1,66 @@
+"use strict";
+const {chromium}=require("playwright"),fs=require("node:fs"),os=require("node:os"),path=require("node:path"),assert=require("node:assert/strict");
+const {createApp}=require("../server.cjs"),D=require("../domain.cjs");
+(async()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"aurea-custody-orders-")),app=createApp({dataDir:dir});
+  let browser;
+  try {
+    await app.ready;await new Promise(r=>app.server.listen(0,"127.0.0.1",r));
+    const base="http://127.0.0.1:"+app.server.address().port;
+    browser=await chromium.launch({headless:true,channel:process.env.TALLER_BROWSER||"msedge"});
+    const page=await browser.newPage({viewport:{width:390,height:844},locale:"es-CO"}),errors=[];
+    page.on("pageerror",e=>errors.push(e.message));
+    await page.goto(base);
+    for(const [name,value] of Object.entries({workshop:"Custodia",name:"Admin",username:"admin",password:"1234"}))await page.locator(`[name=${name}]`).fill(value);
+    await page.locator("#auth-form button[type=submit]").click();await page.locator("h1").waitFor();
+    const act=async(action,data)=>{
+      const result=await page.evaluate(async({action,data})=>{
+        const {state}=await (await fetch("/api/state")).json();
+        const r=await fetch("/api/action",{method:"POST",headers:{"Content-Type":"application/json","If-Match":String(state.revision),"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({action,data})});
+        return {status:r.status,body:await r.json()};
+      },{action,data});assert.equal(result.status,200,JSON.stringify(result.body));return result.body.result;
+    };
+    const client=await act("client.save",{name:"Cliente con oro"}),other=await act("client.save",{name:"Sin custodia"});
+    await act("client.save",{id:client.id,name:client.name,custody:{weight:10,purity:750,note:"Entrega inicial"}});
+    await page.reload();
+    const click=async action=>page.locator(`[data-action="${action}"]`).first().click();
+    await click("receive");
+    await page.locator("[name=clientId]").selectOption(client.id);
+    assert.match(await page.locator("#reception-custody-balance").innerText(),/10,000 g/);
+    await page.locator("[name=useClientCustody]").check();
+    await page.locator("[name=receivedWeight]").fill("7,0");
+    await page.locator("[name=clientId]").selectOption(other.id);
+    assert.match(await page.locator("#reception-custody-balance").innerText(),/No hay oro/);
+    assert.equal(await page.locator("[name=receivedWeight]").inputValue(),"0,000");
+    await page.locator("[name=clientId]").selectOption(client.id);
+    await page.locator("[name=description]").fill("Anillo con oro de custodia");
+    await page.locator("[name=condition]").fill("Oro recibido previamente");
+    await page.locator("[name=receivedWeight]").fill("11,0");
+    await page.locator("#receive-form button[type=submit]").click();
+    await page.locator(".form-error").filter({hasText:/Existencia insuficiente/}).waitFor();
+    await page.locator("[name=receivedWeight]").fill("7,0");
+    await page.locator("#receive-form button[type=submit]").click();
+    await page.locator("h1").filter({hasText:"T-0001"}).waitFor();
+    assert.match(await page.locator("main").innerText(),/Custodia previa del cliente/);
+    assert.equal(await page.locator('[data-action="gem-weight"]').count(),0);
+    const state=await page.evaluate(async()=> (await (await fetch("/api/state")).json()).state);
+    assert.equal(D.balance(state,"custody","oro",750,"cliente:"+client.id),3000);
+    assert.equal(D.balance(state,"custody","oro",750,state.orders[0].id),7000);
+    await page.reload();await page.locator("h1").waitFor();
+    await act("order.cancel",{id:state.orders[0].id,reason:"Prueba de devolución"});
+    await page.reload();await page.locator("h1").waitFor();
+    await click("menu");await page.locator("[data-nav=orders]").click();await click("receive");
+    await page.locator("[name=clientId]").selectOption(client.id);
+    assert.match(await page.locator("#reception-custody-balance").innerText(),/10,000 g/);
+    assert.equal(await page.locator("[name=useClientCustody]").isChecked(),false);
+    await page.locator("[name=metal]").selectOption("plata");
+    await page.locator("#reception-custody-controls").waitFor({state:"hidden"});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+    assert.deepEqual(errors,[]);
+    console.log("Custodia previa en navegador: reserva, error de saldo, cambio de cliente, cancelación y móvil OK");
+  } finally {
+    if(browser)await browser.close();
+    await new Promise(r=>app.server.close(r));
+    fs.rmSync(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+  }
+})().catch(e=>{console.error(e);process.exitCode=1;});

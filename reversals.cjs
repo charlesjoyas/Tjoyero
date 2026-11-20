@@ -136,11 +136,15 @@ module.exports = function reverse(s, b, a, D) {
       for(const account of ["custody","scrap"]){
         // La custodia es exclusiva de esta orden; se devuelven pieza y sobrantes reales.
         const rows=D.balances(s).filter(x=>x.owner===o.id&&x.account===account);
-        for(const x of rows)move(s,a,account,"cliente",x.mg,x.metal,x.purity,o.id,ref,"Devolución al reversar orden "+o.code+": "+reason);
+        for(const x of rows) {
+          if(o.custodyFromClient) D.transferClientCustody(s,a,o,o.id,account,"cliente:"+o.clientId,x.mg,"Devolución a custodia al reversar "+o.code+": "+reason);
+          else move(s,a,account,"cliente",x.mg,x.metal,x.purity,o.id,ref,"Devolución al reversar orden "+o.code+": "+reason);
+        }
       }
       o.status="cancelled";mark(o);record.recovered=recovered;
       timeline(o,a,"Orden reversada completamente y retirada de trabajos: "+reason);
       record.summary="Orden "+o.code+" reversada y retirada de las órdenes de trabajo. Pieza y sobrantes del cliente devueltos; metal propio de la pieza recuperado en bodega. "+(refund?"Saldo de "+refund+" COP devuelto en "+(b.refundMethod==="cash"?"efectivo":"banco")+". ":"Sin saldo abonado pendiente. ")+"La merma, los insumos consumidos y los honorarios de trabajo realizado se conservan; la limalla propia permanece en su cuenta.";
+      if(o.custodyFromClient) record.summary += " El oro recuperado del cliente vuelve a su custodia disponible.";
       break;
     }
     case "assignment": {

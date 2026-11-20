@@ -254,6 +254,15 @@ function move(s, a, from, to, mg, m, p, owner, ref, note) {
     note,
   });
 }
+// Paired ledger entries change the custody owner without receiving new metal.
+function transferClientCustody(s, a, o, fromOwner, fromAccount, toOwner, mg, note) {
+  if (!mg) return;
+  const transferId = id();
+  move(s, a, fromAccount, "custodia_orden", mg, o.metal, o.purity, fromOwner, o.code, note);
+  Object.assign(s.ledger.at(-1), { custodyOrderId: o.id, custodyTransferId: transferId });
+  move(s, a, "custodia_orden", "custody", mg, o.metal, o.purity, toOwner, o.code, note);
+  Object.assign(s.ledger.at(-1), { custodyOrderId: o.id, custodyTransferId: transferId });
+}
 function total(o) {
   return o.labor + o.materialPrice + o.goldPrice + o.tax;
 }
@@ -398,7 +407,7 @@ function execute(s, action, b, a) {
     }
     case "operation.reverse": {
       permit(a,"adjust");
-      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM,Gems,gemTools});
+      return require("./reversals.cjs")(s,b,a,{assert,get,str,id,now,move,transferClientCustody,cash,openShift,balance,balances,paid,total,timeline,execute,materialQuantity,money,PM,Gems,gemTools});
     }
     case "category.delete": {
       permit(a, "settings");
@@ -542,6 +551,13 @@ function execute(s, action, b, a) {
         x.type !== "Producción propia" || x.receivedMg === 0,
         "La producción propia no recibe metal de clientes.",
       );
+      if (b.useClientCustody === true) {
+        assert(x.type !== "Producción propia" && !get(s,"clients",x.clientId).internal,
+          "Selecciona un cliente para usar su oro en custodia.");
+        assert(x.metal === "oro" && x.receivedMg > 0 && b.hasStones !== true,
+          "Indica los gramos netos de oro en custodia que usarás, sin registrar una nueva joya recibida.");
+        x.custodyFromClient = true;
+      }
       if (b.hasStones === true) {
         assert(x.type!=="Producción propia","Registra las piedras propias desde la ficha del trabajo.");
         x.gemWeight={grossMg:grams(b.grossWeight,"Peso bruto de la joya"),netMg:x.receivedMg,status:b.weightStatus};
@@ -559,7 +575,10 @@ function execute(s, action, b, a) {
         );
         x.photo = b.photo;
       }
-      if (x.receivedMg)
+      if (x.custodyFromClient)
+        transferClientCustody(s, a, x, "cliente:" + x.clientId, "custody", x.id,
+          x.receivedMg, "Oro de la custodia del cliente reservado para " + x.code);
+      else if (x.receivedMg)
         move(
           s,
           a,
@@ -895,7 +914,10 @@ function execute(s, action, b, a) {
       );
       const reason = str(b.reason, "Motivo de anulación", 1000);
       Gems.close(s,o,b,a,gemTools());
-      if (o.receivedMg)
+      if (o.custodyFromClient)
+        transferClientCustody(s, a, o, o.id, "custody", "cliente:" + o.clientId,
+          o.receivedMg, "Oro devuelto a la custodia del cliente al anular " + o.code);
+      else if (o.receivedMg)
         move(
           s,
           a,
@@ -1980,7 +2002,7 @@ function validateState(s, { backup = false } = {}) {
       assert(clients.has(x.owner.slice("cliente:".length)), "Custodia manual sin cliente válido.");
       const receipt = x.from === "cliente" && x.to === "custody" && x.ref === "CUSTODIA";
       const compensation = x.from === "custody" && x.to === "cliente" && typeof x.ref === "string" && x.ref.startsWith("REV-");
-      assert(x.metal === "oro" && (receipt || compensation), "Movimiento de custodia manual inválido.");
+      assert(x.metal === "oro" && (receipt || compensation || x.custodyTransferId), "Movimiento de custodia manual inválido.");
       if (compensation) {
         const reversal = (s.reversals || []).find(entry => entry.id === x.ref.slice(4) && entry.type === "ledger");
         const original = reversal && s.ledger.find(entry => entry.id === reversal.targetId);
@@ -1997,6 +2019,38 @@ function validateState(s, { backup = false } = {}) {
   for (const entry of s.ledger) {
     if (entry.ref === "CUSTODIA" && entry.owner.startsWith("cliente:") && entry.reversedAt)
       assert(custodyCompensations.has(entry.id), "El ingreso de custodia reversado no tiene compensación.");
+  }
+  const custodyTransfers = new Map();
+  for (const entry of s.ledger) {
+    if (entry.from === "custodia_orden" || entry.to === "custodia_orden" || entry.custodyTransferId || entry.custodyOrderId) {
+      assert(typeof entry.custodyTransferId === "string" && entry.custodyTransferId && entry.custodyOrderId,
+        "Traslado de custodia sin identificación.");
+      const rows = custodyTransfers.get(entry.custodyTransferId) || [];
+      rows.push(entry); custodyTransfers.set(entry.custodyTransferId, rows);
+    }
+  }
+  const reservedCustody = new Map();
+  for (const rows of custodyTransfers.values()) {
+    assert(rows.length === 2, "El traslado de custodia debe tener salida y entrada.");
+    const out = rows.find(x => x.to === "custodia_orden"), incoming = rows.find(x => x.from === "custodia_orden");
+    const o = out && s.orders.find(x => x.id === out.custodyOrderId);
+    assert(o && o.custodyFromClient === true && o.type !== "Producción propia" && o.metal === "oro" &&
+      incoming && incoming.custodyOrderId === o.id && incoming.to === "custody" &&
+      out.mg === incoming.mg && out.metal === o.metal && incoming.metal === o.metal &&
+      out.purity === o.purity && incoming.purity === o.purity && out.ref === o.code && incoming.ref === o.code,
+      "Las entradas y salidas de custodia no corresponden a la orden.");
+    const clientOwner = "cliente:" + o.clientId;
+    const reservation = out.owner === clientOwner && out.from === "custody" && incoming.owner === o.id;
+    const returned = out.owner === o.id && ["custody", "scrap"].includes(out.from) && incoming.owner === clientOwner;
+    assert(reservation || (returned && o.status === "cancelled"), "Destino inválido del oro en custodia.");
+    if (reservation) reservedCustody.set(o.id, (reservedCustody.get(o.id) || 0) + out.mg);
+  }
+  for (const o of s.orders) {
+    if (o.custodyFromClient !== undefined) {
+      assert(o.custodyFromClient === true && !o.gemWeight && o.receivedMg > 0 &&
+        reservedCustody.get(o.id) === o.receivedMg,
+        "El oro reservado no coincide con el peso recibido de la orden.");
+    }
   }
   assert(
     balances(s).every((x) => Number.isSafeInteger(x.mg) && x.mg >= 0),

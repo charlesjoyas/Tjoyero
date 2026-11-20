@@ -12,6 +12,29 @@ const { createApp } = require("../server.cjs");
 const { PART_BYTES } = require("../transfers.cjs");
 const setupKey = "clave-de-puesta-en-marcha-pruebas-123456";
 
+test("Nube: reservar custodia es atómico, idempotente y persiste en reinicios y copias", async t => {
+  const f=await fixture(t);
+  await f.request("/api/setup",{workshop:"Custodia",name:"Admin",username:"admin",password:"1234",setupKey});
+  const client=(await f.act("client.save",{name:"Cliente"})).body.result;
+  await f.act("client.save",{id:client.id,name:client.name,custody:{weight:10,purity:750,note:"Saldo previo"}});
+  const payload={clientId:client.id,type:"Fabricación",description:"Anillo",condition:"Oro previamente recibido",metal:"oro",purity:750,receivedWeight:7,dueDate:"2026-12-01",labor:0,taxPercent:0,useClientCustody:true};
+  const key=randomUUID(),before=await f.state();
+  const invalid=await f.act("order.create",{...payload,materialPrice:1,ownStones:[{stockId:"inexistente",quantity:1,carats:1,price:1}]});
+  assert.equal(invalid.status,400);assert.deepEqual(await f.state(),before);
+  const response=await f.act("order.create",payload,key);assert.equal(response.status,200);
+  const saved=await f.state(),D=require("../domain.cjs");
+  assert.equal(D.balance(saved,"custody","oro",750,"cliente:"+client.id),3000);
+  assert.equal((await f.act("order.create",payload,key)).status,200);assert.deepEqual(await f.state(),saved);
+  assert.equal((await f.act("order.create",payload,randomUUID(),before.revision)).status,409);
+  assert.equal((await f.act("order.create",payload)).status,400);assert.deepEqual(await f.state(),saved);
+  await f.open();assert.deepEqual(await f.state(),saved);
+  const backup=(await f.request("/api/backup")).body;
+  assert.equal((await f.act("order.cancel",{id:response.body.result.id,reason:"Cancelado"})).status,200);
+  assert.equal(D.balance(await f.state(),"custody","oro",750,"cliente:"+client.id),10000);
+  assert.equal((await f.act("backup.restore",{backup,password:"1234"})).status,200);
+  assert.equal(D.balance(await f.state(),"custody","oro",750,"cliente:"+client.id),3000);
+});
+
 test("Nube: recepción con piedras es atómica e idempotente, sin duplicar precio ni inventario",async t=>{
  const f=await fixture(t);await f.request("/api/setup",{workshop:"Recepción",name:"Admin",username:"admin",password:"1234",setupKey});
  const client=(await f.act("client.save",{name:"Cliente"})).body.result,lot=(await f.act("gem.lot",{name:"Esmeralda",quantity:1,carats:.5,cost:100000,unitPrice:180000})).body.result;

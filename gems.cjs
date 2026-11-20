@@ -71,6 +71,7 @@ function execute(s,action,b,a,D,options={}) {
   const o=D.get(s,"orders",b.orderId);
   D.assert(!["delivered","cancelled"].includes(o.status),"La orden está cerrada. Reversa primero su entrega.");
   if(action==="gem.weight") {
+    D.assert(!o.custodyFromClient,"Esta orden usa oro ya pesado de la custodia del cliente. Anula la orden y vuelve a reservar el peso correcto.");
     D.permit(a,"orders");D.assert(o.status==="received"&&!o.allocations.length,"Confirma el peso neto antes de asignar a mesa.");
     const grossMg=D.grams(b.grossWeight,"Peso bruto de la joya"),netMg=D.grams(b.netWeight??0,"Peso neto del metal",true),status=b.weightStatus;
     const next={grossMg,netMg,status};

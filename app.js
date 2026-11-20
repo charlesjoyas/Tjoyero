@@ -1022,6 +1022,43 @@ function receptionGemModal(id) {
   form.elements.quantity.addEventListener("input",()=>{const lot=lots.find(x=>x.id===form.elements.stockId.value);setNumericValue(form.elements.price,lot.unitPrice*numericValue(form.elements.quantity));});
   if(!item)update();
 }
+function receptionClientCustodyFields() {
+  return `<div id="reception-custody-controls" class="span-2 form-section">
+    <label><input type="checkbox" name="useClientCustody"> Usar oro que el cliente ya tiene en custodia</label>
+    <p id="reception-custody-balance" class="muted" aria-live="polite"></p>
+    <small>Al marcarlo, el peso indicado se reserva para esta orden. No registres ese mismo oro como una nueva entrega ni como metal vendido.</small>
+  </div>`;
+}
+function updateReceptionCustody(form) {
+  const own = form.elements.type.value === "Producción propia";
+  const eligible = !own && form.elements.metal.value === "oro";
+  const checkbox = form.elements.useClientCustody;
+  $("#reception-custody-controls", form).hidden = !eligible;
+  checkbox.disabled = !eligible;
+  if (!eligible) checkbox.checked = false;
+  const use = eligible && checkbox.checked;
+  const owner = clientCustodyOwner(form.elements.clientId.value);
+  const rows = getBalances().filter(x => x.owner === owner && x.account === "custody" && x.metal === "oro" && x.mg > 0);
+  const available = balance("custody", "oro", numericValue(form.elements.purity), owner);
+  $("#reception-custody-balance", form).textContent = !form.elements.clientId.value
+    ? "Selecciona el cliente para consultar su custodia."
+    : `Disponible en la ley seleccionada: ${weight(available)}.` +
+      (rows.length ? " Custodia por ley: " + rows.map(x => `${number(x.purity)}: ${weight(x.mg)}`).join(" · ") : " No hay oro disponible en custodia directa.");
+  const weightControl = form.elements.receivedWeight.closest(".weight-control");
+  $("span", weightControl).textContent = use ? "Oro en custodia a usar en esta orden (g)" : "Peso neto del metal recibido, sin piedras (g)";
+  const capture = $("[data-action=capture-received]", form);
+  capture.disabled = own || use;
+  capture.closest(".field").hidden = own || use;
+  if (use) {
+    form.elements.hasStones.checked = false;
+    form.elements.hasStones.disabled = true;
+    $("#receive-stone-controls", form).hidden = true;
+    $("#receive-stone-weights", form).hidden = true;
+    form.elements.grossWeight.required = false;
+    form.elements.grossWeight.disabled = true;
+    form.elements.weightStatus.disabled = true;
+  }
+}
 function receivePage() {
   if (!can("orders")) return notice("Acceso restringido");
   return (
@@ -1040,7 +1077,7 @@ function receivePage() {
         )) +
     formWrap(
       "receive-form",
-      `<div class="grid two"><section class="card"><div class="card-head"><div><h2 id="reception-owner-title">1. Lo que trae el cliente</h2><p id="reception-owner-help">Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${weightField("receivedWeight", "Peso neto del metal recibido, sin piedras (g)", 0, true)}${receptionStoneWeightFields()}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2 id="reception-budget-title">2. Lo que le cobras al cliente</h2><p id="reception-budget-help">Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${receptionOwnStonesControls()}${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
+      `<div class="grid two"><section class="card"><div class="card-head"><div><h2 id="reception-owner-title">1. Lo que trae el cliente</h2><p id="reception-owner-help">Describe la pieza recibida. Este metal pertenece al cliente y no sale de tu bodega.</p></div>${button("Nuevo cliente", "new-client", "plus", "small")}</div><div class="form-grid">${select("clientId", "Cliente", [["", "Seleccionar cliente"], ...S.clients.map((c) => [c.id, c.name + " · " + (c.document || c.phone || "Sin documento")])], "")}${select("type", "Tipo de trabajo", ["Reparación", "Fabricación", "Arreglo / talla", "Producción propia"], "Reparación")}<div class="span-2">${field("description", "Trabajo solicitado", "text", "", 'required maxlength="2000" placeholder="Ej. Soldadura de cadena y cambio de broche"')}</div>${metalSelect("oro", "Metal de la pieza recibida")}${puritySelect()}${receptionClientCustodyFields()}${weightField("receivedWeight", "Peso neto del metal recibido, sin piedras (g)", 0, true)}${receptionStoneWeightFields()}<div class="field"><span>Captura de peso</span>${button("Usar lectura de balanza", "capture-received", "gold", "")}<small class="scale-status">${scaleStatus()}</small></div><div class="span-2">${text("condition", "Estado de la pieza, piedras y accesorios recibidos")}<small>Describe rayones, faltantes, gemas, grabados y lo que queda bajo custodia.</small></div><div class="span-2">${field("photo", "Fotografía de recepción (opcional)", "file", "", 'accept="image/*" capture="environment"')}<div id="photo-preview"></div></div></div></section><section class="card"><div class="card-head"><div><h2 id="reception-budget-title">2. Lo que le cobras al cliente</h2><p id="reception-budget-help">Mano de obra, insumos y metal vendido. Importes antes de impuestos, en pesos colombianos.</p></div></div><div class="form-grid">${moneyField("labor", "Mano de obra · COP")}<div class="field"><span>Ayuda para cotizar</span>${button("Estimar mano de obra", "estimate-labor", "chart", "")}<input type="hidden" name="laborEstimate" value=""></div><div id="labor-estimate-summary" class="span-2"></div>${receptionOwnStonesControls()}${moneyField("materialPrice", "Piedras e insumos · COP")}<div class="span-2 form-section"><h3>Metal que vende el taller (opcional)</h3><p>Si solo reparas la pieza del cliente, no necesitas añadir metal al presupuesto.</p></div><div class="span-2 actions">${button("Añadir metal a cobrar", "new-order-metal", "plus", "small")}</div><input type="hidden" name="orderMetals" value="[]"><div id="order-metal-list" class="span-2"></div>${moneyField("goldPrice", "Total a cobrar por metal · COP")}<div class="span-2">${notice("3. Cómo se mueve el inventario", "Añadir un cobro al presupuesto no descuenta gramos. Para usar metal propio, registra su peso en Asignar a mesa: allí se traslada del origen elegido al trabajo.", "blue")}</div>${field("taxPercent", "Impuesto configurado (%)", "number", S.settings.taxPercent, 'min="0" max="100" step="0.01" required')}${field("dueDate", "Fecha prometida", "date", today(), "required")}${select("priority", "Prioridad", ["Normal", "Urgente"], "Normal")}<div class="span-2">${text("notes", "Ficha técnica: medidas, talla, diseño y observaciones")}</div><div id="quote-preview" class="span-2 calculator"></div><div class="span-2">${notice("Anticipos y pagos", "Después de guardar la orden podrás registrar dinero o metal como pago, con su comprobante y turno de caja.")}</div></div></section></div>`,
       "Registrar orden y abrir detalle",
     )
   );
@@ -1072,6 +1109,7 @@ function updateReceptionType(form) {
     setNumericValue(form.elements.receivedWeight, 0);
     form.elements.receivedWeight.readOnly = true;
   } else form.elements.receivedWeight.readOnly = false;
+  updateReceptionCustody(form);
 }
 function quotePreview(form) {
   const b = inputData(form),
@@ -1200,7 +1238,7 @@ function orderDetail(o) {
       ) +
       allowed(
         "orders",
-        "Anular y devolver",
+        o.custodyFromClient ? "Anular y liberar custodia" : "Anular y devolver",
         "cancel-order",
         "",
         "danger",
@@ -1293,6 +1331,7 @@ function orderDetail(o) {
   let reception =
     row("Cliente", E(client(o))) +
     row("Metal en custodia", weight(o.receivedMg)) +
+    (o.custodyFromClient ? row("Origen del oro", "Custodia previa del cliente; reservado para esta orden") : "") +
     row("Ley", E(o.metal) + " · " + number(o.purity));
   reception +=
     '<div style="font-size:12px;line-height:1.9;margin-top:16px"><strong>Estado recibido</strong><p>' +
@@ -1488,6 +1527,9 @@ function orderDetail(o) {
   );
 }
 
+function movementAccountLabel(account) {
+  return account === "custodia_orden" ? "Reserva de custodia para orden" : (ACC[account] || account);
+}
 function clientCustodyOwner(id) {
   return "cliente:" + id;
 }
@@ -1651,7 +1693,7 @@ function goldPage() {
         .map((x) =>
           tr([
             `<strong>${E(x.ref)}</strong><small>${dt(x.at)}</small>`,
-            `<span>${E(ACC[x.from] || x.from)}</span><small>→ ${E(ACC[x.to] || x.to)}</small>`,
+            `<span>${E(movementAccountLabel(x.from))}</span><small>→ ${E(movementAccountLabel(x.to))}</small>`,
             E(x.metal) + " · " + number(x.purity),
             weight(x.mg),
             fine(x.fineUg),
@@ -2046,7 +2088,7 @@ function orderStonesCard(o) {
   const editable=["received","in_progress"].includes(o.status),change=["received","in_progress","quality"].includes(o.status);
   const w=o.gemWeight,weightInfo=w?notice("Peso bruto y metal neto separados",`Peso bruto recibido: ${weight(w.grossMg)}. Metal neto: ${weight(w.netMg)} · ${({pending:"pendiente de pesar",estimated:"estimado, sin ingresar al libro",confirmed:"confirmado e ingresado al libro"})[w.status]}. Las piedras no se contabilizan como oro.`,w.status==="confirmed"?"blue":"amber"):"";
   return card("Piedras de este trabajo","Una línea por piedra individual o grupo con el mismo destino. Los precios de piedras propias se suman una sola vez a Piedras e insumos.",weightInfo+
-    `<div class="actions">${o.status==="received"&&o.type!=="Producción propia"?allowed("orders",w?"Revisar peso neto":"Joya con piedras: registrar pesos","gem-weight","","",o.id):""}${o.status==="received"&&o.type!=="Producción propia"?allowed("orders","Recibir piedras del cliente","gem-customer","plus","",o.id):""}${editable?allowed("production","Añadir piedras del taller","gem-own","plus","",o.id):""}</div>`+
+    `<div class="actions">${o.status==="received"&&o.type!=="Producción propia"&&!o.custodyFromClient?allowed("orders",w?"Revisar peso neto":"Joya con piedras: registrar pesos","gem-weight","","",o.id):""}${o.status==="received"&&o.type!=="Producción propia"?allowed("orders","Recibir piedras del cliente","gem-customer","plus","",o.id):""}${editable?allowed("production","Añadir piedras del taller","gem-own","plus","",o.id):""}</div>`+
     table(["Piedra / propietario","Cantidad / peso","Estado","Precio total incluido",""],(o.stones||[]).map(x=>tr([`<strong>${E(x.name)}</strong><small>${x.owner==="cliente"?"Cliente · en custodia":"Taller · descontada de inventario"}</small>`,number(x.quantity)+"<small>"+E(ctLabel(x.caratMilli))+"</small>",badge(stoneStatuses[x.status],x.status==="lost"?"red":x.status==="held"?"amber":""),x.owner==="cliente"?"No se cobra":cop(["returned","lost"].includes(x.status)?0:x.price),`<div class="actions">${button("Ficha","gem-detail","","small",o.id+"|"+x.id)}${change&&["held","mounted"].includes(x.status)?(x.status==="held"&&o.status!=="received"?allowed("production","Montar","gem-mount","","small",o.id+"|"+x.id):"")+(x.status==="mounted"?allowed("production","Desmontar","gem-unmount","","small",o.id+"|"+x.id):"")+allowed("production",x.owner==="taller"?"Recuperar a inventario":"Devolver al cliente","gem-return","","small",o.id+"|"+x.id)+allowed("adjust","Registrar pérdida","gem-loss","","small danger",o.id+"|"+x.id):""}</div>`])).join(""),"Sin piedras registradas para este trabajo."));
 }
 function gemDetailHtml(x) {
@@ -2326,7 +2368,7 @@ function reverseOperationModal(type="purchase",targetId="",mode="reverse") {
       if(!prepared||prepared.signature!==signature) {
         const preview=await api("/api/reversal-preview",{method:"POST",body:JSON.stringify(payload)});
         prepared={signature,preview};
-        $("#reversal-preview",form).innerHTML=card("Efecto de la reversión","Todavía no se ha guardado.",`<p>${E(preview.summary)}</p>${row("Cambio de efectivo en el turno abierto",cop(preview.cashDelta))}${preview.bankDelta ? row("Movimiento bancario respaldado",cop(preview.bankDelta)) : ""}${preview.movements.map(x=>row((ACC[x.from]||x.from)+" → "+(ACC[x.to]||x.to),weight(x.mg)+" · "+E(x.metal)+" · ley "+number(x.purity))).join("")}${preview.materials.map(x=>row("Existencia resultante: "+x.name,quantity(x.quantity)+" "+E(x.unit))).join("")}${preview.stock.map(x=>row("Unidades disponibles: "+x.sku,number(x.available))).join("")}${(preview.gems||[]).map(x=>row("Piedras en bodega: "+x.name,number(x.available)+" und. · "+number(x.carats,3)+" ct · "+cop(x.cost))).join("")}${(preview.stones||[]).map(x=>row(x.order+" · "+x.name,E(stoneStatuses[x.status]))).join("")}`);
+        $("#reversal-preview",form).innerHTML=card("Efecto de la reversión","Todavía no se ha guardado.",`<p>${E(preview.summary)}</p>${row("Cambio de efectivo en el turno abierto",cop(preview.cashDelta))}${preview.bankDelta ? row("Movimiento bancario respaldado",cop(preview.bankDelta)) : ""}${preview.movements.map(x=>row((movementAccountLabel(x.from))+" → "+(movementAccountLabel(x.to)),weight(x.mg)+" · "+E(x.metal)+" · ley "+number(x.purity))).join("")}${preview.materials.map(x=>row("Existencia resultante: "+x.name,quantity(x.quantity)+" "+E(x.unit))).join("")}${preview.stock.map(x=>row("Unidades disponibles: "+x.sku,number(x.available))).join("")}${(preview.gems||[]).map(x=>row("Piedras en bodega: "+x.name,number(x.available)+" und. · "+number(x.carats,3)+" ct · "+cop(x.cost))).join("")}${(preview.stones||[]).map(x=>row(x.order+" · "+x.name,E(stoneStatuses[x.status]))).join("")}`);
         $('button[type="submit"]',form).textContent=deleting?"Confirmar eliminación":"Confirmar reversión";
         return false;
       }
@@ -3066,7 +3108,9 @@ function clientDetail(id) {
         history.map(entry => tr([
           dt(entry.at), entry.purity, (entry.to === "custody" ? "+" : "−") + weight(entry.mg),
           E(entry.note), E(entry.actor),
-          entry.reversedAt ? reversalBadge(entry) : entry.from === "custody" ? "Compensación" : "Ingreso",
+          entry.reversedAt ? reversalBadge(entry) : entry.custodyTransferId
+            ? (entry.from === "custody" ? "Reservado para orden" : "Devuelto a custodia")
+            : entry.from === "custody" ? "Compensación" : "Ingreso",
         ])).join(""),
         "Aún no hay ingresos de custodia directa.",
       ))}<div class="section-gap">${orderTable(orders)}</div>`,
@@ -3189,6 +3233,20 @@ function bindPage() {
   const f = $("#receive-form");
   if (f) {
     f.elements.hasStones.addEventListener("change",()=>updateReceptionType(f));
+    f.elements.useClientCustody.addEventListener("change", () => {
+      setNumericValue(f.elements.receivedWeight, 0);
+      updateReceptionType(f);
+    });
+    f.addEventListener("input", e => {
+      if (e.target.name === "purity") updateReceptionCustody(f);
+    });
+    f.addEventListener("change", e => {
+      if (["clientId", "metal"].includes(e.target.name) || e.target.matches("[data-gold-category]")) {
+        if (f.elements.useClientCustody.checked) setNumericValue(f.elements.receivedWeight, 0);
+        // Category/metal synchronization runs in the document change handler.
+        queueMicrotask(() => updateReceptionType(f));
+      }
+    });
     updateReceptionType(f);
     quotePreview(f);
     if (receivedPhoto)
@@ -3205,6 +3263,7 @@ function bindPage() {
         b.orderMetals = JSON.parse(b.orderMetals || "[]");
         b.ownStones=JSON.parse(b.ownStones||"[]");
         b.hasStones=!!b.hasStones;
+        b.useClientCustody=!!b.useClientCustody;
         if (photoPromise) await photoPromise;
         delete b.photo;
         b.photo = receivedPhoto;
@@ -3493,8 +3552,8 @@ async function exportData(type, id) {
         .map((x) => [
           window.TallerExcel.date(x.at),
           x.ref,
-          ACC[x.from] || x.from,
-          ACC[x.to] || x.to,
+          movementAccountLabel(x.from),
+          movementAccountLabel(x.to),
           x.metal,
           x.purity,
           x.mg / 1000,
@@ -3913,8 +3972,11 @@ async function handleAction(action, id, el) {
         "Anular orden y devolver custodia",
         "order.cancel",
         notice(
-          "Devuelve la pieza al cliente",
-          "Confirma la devolución física de la pieza y de todas sus piedras. Las piedras propias recuperadas vuelven a bodega; las del cliente se entregan a su dueño. Solo se permite sin producción ni pagos.",
+          find("orders", id).custodyFromClient ? "El oro vuelve a la custodia del cliente" : "Devuelve la pieza al cliente",
+          (find("orders", id).custodyFromClient
+            ? "Los gramos reservados se liberarán y volverán al saldo disponible del cliente. No se registra una entrega física de ese oro. Confirma la devolución de sus piedras, si existen. "
+            : "Confirma la devolución física de la pieza y de todas sus piedras. ") +
+          "Las piedras propias recuperadas vuelven a bodega; las del cliente se entregan a su dueño. Solo se permite sin producción ni pagos.",
           "amber",
         ) +
           field(
@@ -4159,8 +4221,8 @@ async function handleAction(action, id, el) {
         "Movimiento · " + x.ref,
         row("Fecha", dt(x.at)) +
           row("Responsable", E(x.actor)) +
-          row("Origen", E(ACC[x.from] || x.from)) +
-          row("Destino", E(ACC[x.to] || x.to)) +
+          row("Origen", E(movementAccountLabel(x.from))) +
+          row("Destino", E(movementAccountLabel(x.to))) +
           row("Metal y ley", E(x.metal) + " · " + number(x.purity)) +
           row("Peso bruto", weight(x.mg)) +
           row("Fino equivalente", fine(x.fineUg)) +
