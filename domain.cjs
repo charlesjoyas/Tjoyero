@@ -931,9 +931,11 @@ function execute(s, action, b, a) {
           "Custodia devuelta al anular",
         );
       o.status = "cancelled";
-      timeline(o, a, "Anulada y custodia devuelta: " + reason);
+      timeline(o, a, (o.custodyFromClient
+        ? "Anulada; oro liberado a la custodia disponible del cliente: "
+        : "Anulada y custodia devuelta: ") + reason);
       s.reversals??=[];
-      s.reversals.push({id:id(),type:"order",targetId:o.id,at:now(),actor:a.name,reason,reference:str(b.reference,"Soporte de devolución",200,false),summary:"Orden "+o.code+" anulada sin producción ni saldo abonado; custodia devuelta."});
+      s.reversals.push({id:id(),type:"order",targetId:o.id,at:now(),actor:a.name,reason,reference:str(b.reference,"Soporte de devolución",200,false),summary:"Orden "+o.code+" anulada sin producción ni saldo abonado; "+(o.custodyFromClient?"oro liberado a la custodia disponible del cliente.":"custodia devuelta.")});
       return o;
     }
     case "payment.create": {

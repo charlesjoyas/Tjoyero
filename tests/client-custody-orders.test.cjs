@@ -35,6 +35,30 @@ test("Custodia previa: reserva gramos sin duplicar oro, cobrarlo ni afectar bode
   f.act("order.cancel",{id:o.id,reason:"No se realizará"});
   assert.equal(f.available(),10000);
   assert.equal(D.balance(f.s,"custody","oro",750,o.id),0);
+  assert.match(f.s.orders[0].history.at(-1).text,/oro liberado a la custodia disponible/);
+  assert.match(f.s.reversals.at(-1).summary,/oro liberado a la custodia disponible/);
+});
+
+test("Custodia previa: varias reservas fraccionarias y otros metales propios mantienen separados los saldos", () => {
+  const f=fixture(),first=f.order({receivedWeight:7.999}),second=f.order({receivedWeight:2.001});
+  assert.equal(f.available(),0);
+  const before=structuredClone(f.s);
+  assert.throws(()=>f.order({receivedWeight:.001}),/Existencia insuficiente/);
+  assert.deepEqual(f.s,before);
+  f.act("inventory.adjust",{account:"own",metal:"oro",purity:585,weight:1,reason:"Metal del taller"});
+  f.act("inventory.adjust",{account:"own",metal:"plata",purity:925,weight:2,reason:"Plata del taller"});
+  f.act("order.assign",{id:first.id,smithId:f.smith.id,customerWeight:7.999,ownWeight:.5,ownPurity:585,ownMetals:[{metal:"plata",purity:925,weight:1,source:"own"}]});
+  f.reverse("order",first.id,{metalReturns:[{metal:"oro",purity:750,pieceWeight:7.9,scrapWeight:.05},{metal:"oro",purity:585,pieceWeight:.49,scrapWeight:.005},{metal:"plata",purity:925,pieceWeight:.98,scrapWeight:.01}]});
+  assert.equal(f.available(),7950);
+  assert.equal(D.balance(f.s,"own","oro",585),990);
+  assert.equal(D.balance(f.s,"scrap","oro",585),5);
+  assert.equal(D.balance(f.s,"own","plata",925),1980);
+  assert.equal(D.balance(f.s,"scrap","plata",925),10);
+  assert.equal(D.balance(f.s,"custody","oro",750,second.id),2001);
+  f.act("order.cancel",{id:second.id,reason:"Liberar segunda reserva"});
+  assert.equal(f.available(),9951);
+  assert.equal(f.available(585),3000,"El oro del cliente de otra ley no se mezcla con la bodega");
+  D.validateState(structuredClone(f.s),{backup:true});
 });
 test("Custodia previa: cliente, ley, gramos y joya recibida se validan sin descontar en un fallo", () => {
   const f=fixture(), other=f.act("client.save",{name:"Otro cliente"}),before=structuredClone(f.s);
